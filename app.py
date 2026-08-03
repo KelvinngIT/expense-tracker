@@ -10,22 +10,31 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize session state
+# ======================
+# User Identification
+# ======================
+USER = st.sidebar.text_input("Enter your username", value="guest")
+DATA_DIR = "data"
+os.makedirs(DATA_DIR, exist_ok=True)
+USER_FILE = os.path.join(DATA_DIR, f"{USER}_expenses.csv")
+
+# ======================
+# Load or Initialize Data
+# ======================
 if "expenses" not in st.session_state:
-    st.session_state.expenses = pd.DataFrame(
-        columns=["Date", "Category", "Amount", "Description"]
-    )
+    if os.path.exists(USER_FILE):
+        st.session_state.expenses = pd.read_csv(USER_FILE)
+    else:
+        st.session_state.expenses = pd.DataFrame(
+            columns=["Date", "Category", "Amount", "Description"]
+        )
+
+def save_data():
+    st.session_state.expenses.to_csv(USER_FILE, index=False)
 
 CATEGORIES = [
-    "Food & Dining",
-    "Transportation",
-    "Shopping",
-    "Bills & Utilities",
-    "Entertainment",
-    "Health",
-    "Education",
-    "Travel",
-    "Other"
+    "Food & Dining", "Transportation", "Shopping", "Bills & Utilities",
+    "Entertainment", "Health", "Education", "Travel", "Other"
 ]
 
 # ======================
@@ -55,24 +64,23 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
                 [st.session_state.expenses, pd.DataFrame([new_row])],
                 ignore_index=True
             )
+            save_data()
             st.success(f"Added: {category} - ${amount:.2f}")
 
 # ======================
 # Main Area
 # ======================
 st.title("💰 Expense Tracker")
-st.markdown("Record and manage your daily expenses easily.")
+st.markdown(f"Welcome, **{USER}**! Record and manage your daily expenses easily.")
 
 # Summary
 if not st.session_state.expenses.empty:
     total = st.session_state.expenses["Amount"].sum()
     st.metric("Total Spent", f"${total:.2f}")
     
-    # Category breakdown
     by_category = st.session_state.expenses.groupby("Category")["Amount"].sum().sort_values(ascending=False)
     
     col1, col2 = st.columns(2)
-    
     with col1:
         st.subheader("Spending by Category")
         st.dataframe(
@@ -80,7 +88,6 @@ if not st.session_state.expenses.empty:
             use_container_width=True,
             hide_index=True
         )
-    
     with col2:
         st.subheader("Category Chart")
         st.bar_chart(by_category)
@@ -93,7 +100,6 @@ st.divider()
 st.subheader("All Expenses")
 
 if not st.session_state.expenses.empty:
-    # Show table with index so user can delete
     display_df = st.session_state.expenses.copy()
     display_df.index.name = "Index"
     st.dataframe(display_df, use_container_width=True)
@@ -107,6 +113,7 @@ if not st.session_state.expenses.empty:
         if st.button("🗑️ Delete Selected", type="secondary"):
             removed = st.session_state.expenses.iloc[int(delete_idx)]
             st.session_state.expenses = st.session_state.expenses.drop(int(delete_idx)).reset_index(drop=True)
+            save_data()
             st.success(f"Deleted: {removed['Category']} - ${removed['Amount']:.2f}")
             st.rerun()
     
@@ -115,6 +122,7 @@ if not st.session_state.expenses.empty:
     with col_c:
         if st.button("🧹 Clear All Expenses", type="primary"):
             st.session_state.expenses = pd.DataFrame(columns=["Date", "Category", "Amount", "Description"])
+            save_data()
             st.success("All expenses cleared!")
             st.rerun()
     
@@ -123,7 +131,7 @@ if not st.session_state.expenses.empty:
         st.download_button(
             label="⬇️ Download CSV",
             data=csv,
-            file_name=f"expenses_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            file_name=f"{USER}_expenses_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv",
             use_container_width=True
         )
