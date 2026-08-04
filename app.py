@@ -140,4 +140,4 @@ else:
 
 # Footer
 st.markdown("---")
-st.caption("Built with Streamlit • Free to use and share")
+st.caption("Free to use and share")
