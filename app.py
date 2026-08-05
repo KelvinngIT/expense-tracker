@@ -86,61 +86,6 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
             st.success(f"Added: {category} - ${amount:,.2f}")
 
 # ======================
-# Sidebar - Upload CSV
-# ======================
-st.sidebar.markdown("---")
-st.sidebar.header("📥 Upload Expenses")
-uploaded_file = st.sidebar.file_uploader(
-    "Upload CSV file",
-    type=["csv"],
-    help="Preferred columns: Date, User, Category, Amount, Vendor, Description, Remark, Source"
-)
-
-if uploaded_file is not None:
-    try:
-        import_df = pd.read_csv(uploaded_file)
-        import_df.columns = import_df.columns.str.strip().str.title()
-        
-        min_required = {"Date", "Category", "Amount"}
-        if not min_required.issubset(set(import_df.columns)):
-            st.sidebar.error(
-                f"Missing columns. At least required: {', '.join(min_required)}\n"
-                f"Found: {', '.join(import_df.columns)}"
-            )
-        else:
-            defaults = {
-                "User": USER,
-                "Vendor": "-",
-                "Description": "-",
-                "Remark": "-",
-                "Source": "Import"
-            }
-            for col, default in defaults.items():
-                if col not in import_df.columns:
-                    import_df[col] = default
-            
-            import_df = import_df[COLUMNS].copy()
-            import_df["Amount"] = pd.to_numeric(import_df["Amount"], errors="coerce")
-            import_df = import_df.dropna(subset=["Amount"])
-            import_df["Amount"] = import_df["Amount"].astype(float)
-            
-            for col in COLUMNS:
-                import_df[col] = import_df[col].fillna(defaults.get(col, "-")).astype(str)
-            
-            if st.sidebar.button("Import Data", use_container_width=True, type="primary"):
-                before = len(st.session_state.expenses)
-                st.session_state.expenses = pd.concat(
-                    [st.session_state.expenses, import_df],
-                    ignore_index=True
-                )
-                save_data()
-                added = len(st.session_state.expenses) - before
-                st.sidebar.success(f"Successfully imported {added} expenses!")
-                st.rerun()
-    except Exception as e:
-        st.sidebar.error(f"Error reading file: {e}")
-
-# ======================
 # Sidebar - Filters (Year + Month)
 # ======================
 st.sidebar.markdown("---")
@@ -240,7 +185,40 @@ if not filtered_df.empty:
                 st.success(f"Deleted {len(selected_indices)} expense(s).")
                 st.rerun()
 
-    # Delete all rows
+    # Delete all rows (two-step confirmation)
     with col_del2:
         if "confirm_delete_all" not in st.session_state:
-            st
+            st.session_state.confirm_delete_all = False
+
+        if not st.session_state.confirm_delete_all:
+            if st.button("🧹 Delete All Expenses", type="secondary", use_container_width=True):
+                st.session_state.confirm_delete_all = True
+                st.rerun()
+        else:
+            st.warning("⚠️ Are you sure you want to delete ALL expenses?")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✅ Yes, Delete All", type="primary", use_container_width=True):
+                    st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
+                    save_data()
+                    st.session_state.confirm_delete_all = False
+                    st.success("All expenses have been deleted.")
+                    st.rerun()
+            with c2:
+                if st.button("❌ Cancel", use_container_width=True):
+                    st.session_state.confirm_delete_all = False
+                    st.rerun()
+
+    # Download CSV
+    with col_del3:
+        csv = st.session_state.expenses.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="⬇️ Download CSV",
+            data=csv,
+            file_name=f"{USER}_expenses_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+else:
+    st.write("No data to display for the selected filters.")
