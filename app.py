@@ -21,13 +21,23 @@ USER_FILE = os.path.join(DATA_DIR, f"{USER}_expenses.csv")
 # ======================
 # Load or Initialize Data
 # ======================
+COLUMNS = ["Date", "Period", "User", "Category", "Amount", "Description"]
+
 if "expenses" not in st.session_state:
     if os.path.exists(USER_FILE):
         st.session_state.expenses = pd.read_csv(USER_FILE)
+        # Ensure all required columns exist (for older files)
+        for col in COLUMNS:
+            if col not in st.session_state.expenses.columns:
+                if col == "User":
+                    st.session_state.expenses[col] = USER
+                elif col == "Period":
+                    st.session_state.expenses[col] = ""
+                else:
+                    st.session_state.expenses[col] = ""
+        st.session_state.expenses = st.session_state.expenses[COLUMNS]
     else:
-        st.session_state.expenses = pd.DataFrame(
-            columns=["Date", "Category", "Amount", "Description"]
-        )
+        st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
 
 def save_data():
     st.session_state.expenses.to_csv(USER_FILE, index=False)
@@ -38,12 +48,16 @@ CATEGORIES = [
     "Type", "Family Support", "Assets", "Other"
 ]
 
+# Helper: current period (YYYY-MM)
+current_period = datetime.now().strftime("%Y-%m")
+
 # ======================
 # Sidebar - Add Expense
 # ======================
 st.sidebar.header("➕ Add New Expense")
 with st.sidebar.form("expense_form", clear_on_submit=True):
     date = st.date_input("Date", value=datetime.now())
+    period = st.text_input("Period", value=current_period, help="e.g. 2026-08 or Q3-2026")
     category = st.selectbox("Category", CATEGORIES)
     amount = st.number_input("Amount ($)", min_value=0.0, step=0.01, format="%.2f")
     description = st.text_input("Description", placeholder="e.g. Lunch, Uber...")
@@ -55,6 +69,8 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
         else:
             new_row = {
                 "Date": str(date),
+                "Period": period.strip() if period else current_period,
+                "User": USER,
                 "Category": category,
                 "Amount": float(amount),
                 "Description": description.strip() if description else "-"
@@ -74,29 +90,38 @@ st.sidebar.header("📥 Import Expenses")
 uploaded_file = st.sidebar.file_uploader(
     "Upload CSV file",
     type=["csv"],
-    help="CSV must contain columns: Date, Category, Amount, Description"
+    help="Preferred columns: Date, Period, User, Category, Amount, Description"
 )
 
 if uploaded_file is not None:
     try:
         import_df = pd.read_csv(uploaded_file)
-        # Normalize column names (case-insensitive + strip spaces)
+        # Normalize column names
         import_df.columns = import_df.columns.str.strip().str.title()
         
-        required_cols = {"Date", "Category", "Amount", "Description"}
-        if not required_cols.issubset(set(import_df.columns)):
+        # Required minimum columns
+        min_required = {"Date", "Category", "Amount", "Description"}
+        if not min_required.issubset(set(import_df.columns)):
             st.sidebar.error(
-                f"Missing columns. Required: {', '.join(required_cols)}\n"
+                f"Missing columns. At least required: {', '.join(min_required)}\n"
                 f"Found: {', '.join(import_df.columns)}"
             )
         else:
-            # Keep only required columns and clean data
-            import_df = import_df[["Date", "Category", "Amount", "Description"]].copy()
+            # Add missing optional columns with defaults
+            if "Period" not in import_df.columns:
+                import_df["Period"] = current_period
+            if "User" not in import_df.columns:
+                import_df["User"] = USER
+            
+            # Keep only the standard columns and clean
+            import_df = import_df[COLUMNS].copy()
             import_df["Amount"] = pd.to_numeric(import_df["Amount"], errors="coerce")
             import_df = import_df.dropna(subset=["Amount"])
             import_df["Amount"] = import_df["Amount"].astype(float)
             import_df["Description"] = import_df["Description"].fillna("-").astype(str)
             import_df["Date"] = import_df["Date"].astype(str)
+            import_df["Period"] = import_df["Period"].fillna(current_period).astype(str)
+            import_df["User"] = import_df["User"].fillna(USER).astype(str)
             
             if st.sidebar.button("Import Data", use_container_width=True, type="primary"):
                 before = len(st.session_state.expenses)
@@ -152,50 +177,3 @@ if not st.session_state.expenses.empty:
     display_df.index.name = "Index"
     st.dataframe(display_df, use_container_width=True)
     
-    # Delete section
-    st.markdown("### Delete Expense")
-    col_a, col_b = st.columns([1, 3])
-    with col_a:
-        delete_idx = st.number_input(
-            "Index to delete",
-            min_value=0,
-            max_value=len(st.session_state.expenses) - 1,
-            step=1
-        )
-    with col_b:
-        if st.button("🗑️ Delete Selected", type="secondary"):
-            removed = st.session_state.expenses.iloc[int(delete_idx)]
-            st.session_state.expenses = (
-                st.session_state.expenses
-                .drop(int(delete_idx))
-                .reset_index(drop=True)
-            )
-            save_data()
-            st.success(f"Deleted: {removed['Category']} - ${removed['Amount']:.2f}")
-            st.rerun()
-    
-    # Clear all + Download
-    col_c, col_d = st.columns(2)
-    with col_c:
-        if st.button("🧹 Clear All Expenses", type="primary"):
-            st.session_state.expenses = pd.DataFrame(
-                columns=["Date", "Category", "Amount", "Description"]
-            )
-            save_data()
-            st.success("All expenses cleared!")
-            st.rerun()
-    with col_d:
-        csv = st.session_state.expenses.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="⬇️ Download CSV",
-            data=csv,
-            file_name=f"{USER}_expenses_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-else:
-    st.write("No data to display.")
-
-# Footer
-st.markdown("---")
-st.caption("Free to use and share")
