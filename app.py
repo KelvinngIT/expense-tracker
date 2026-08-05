@@ -34,11 +34,13 @@ if "expenses" not in st.session_state:
             if col not in st.session_state.expenses.columns:
                 st.session_state.expenses[col] = ""
         st.session_state.expenses = st.session_state.expenses[COLUMNS]
-        st.session_state.expenses["Amount"] = pd.to_numeric(
-            st.session_state.expenses["Amount"], errors="coerce"
-        ).fillna(0.0)
     else:
         st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
+
+# Always force Amount to numeric (critical fix)
+st.session_state.expenses["Amount"] = pd.to_numeric(
+    st.session_state.expenses["Amount"], errors="coerce"
+).fillna(0.0)
 
 def save_data():
     st.session_state.expenses.to_csv(USER_FILE, index=False)
@@ -86,6 +88,7 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
             )
             save_data()
             st.success(f"Added: {category} - ${amount:,.2f}")
+            st.rerun()
 
 # ======================
 # Sidebar - Upload CSV
@@ -96,7 +99,7 @@ st.sidebar.header("📥 Upload Expenses")
 uploaded_file = st.sidebar.file_uploader(
     "Upload CSV file",
     type=["csv"],
-    help="Preferred columns: Date, User, Category, Amount, Vendor, Description, Remark, Source"
+    help="Preferred columns: Date, Category, Amount (others optional)"
 )
 
 if uploaded_file is not None:
@@ -107,7 +110,8 @@ if uploaded_file is not None:
         min_required = {"Date", "Category", "Amount"}
         if not min_required.issubset(set(import_df.columns)):
             st.sidebar.error(
-                f"Missing columns. At least required: {', '.join(min_required)}\n"
+                f"Missing required columns.\n"
+                f"Need at least: Date, Category, Amount\n"
                 f"Found: {', '.join(import_df.columns)}"
             )
         else:
@@ -122,13 +126,22 @@ if uploaded_file is not None:
                 if col not in import_df.columns:
                     import_df[col] = default
 
-            import_df = import_df[COLUMNS].copy()
+            # Keep only the columns we need
+            import_df = import_df[[c for c in COLUMNS if c in import_df.columns]].copy()
+
+            # Force Amount to numeric and drop invalid rows
             import_df["Amount"] = pd.to_numeric(import_df["Amount"], errors="coerce")
             import_df = import_df.dropna(subset=["Amount"])
             import_df["Amount"] = import_df["Amount"].astype(float)
 
+            # Fill missing text columns
             for col in COLUMNS:
-                import_df[col] = import_df[col].fillna(defaults.get(col, "-")).astype(str)
+                if col not in import_df.columns:
+                    import_df[col] = defaults.get(col, "-")
+                else:
+                    import_df[col] = import_df[col].fillna(defaults.get(col, "-")).astype(str)
+
+            import_df = import_df[COLUMNS]
 
             if st.sidebar.button("Import Data", use_container_width=True, type="primary"):
                 before = len(st.session_state.expenses)
@@ -136,6 +149,10 @@ if uploaded_file is not None:
                     [st.session_state.expenses, import_df],
                     ignore_index=True
                 )
+                # Force numeric again after import
+                st.session_state.expenses["Amount"] = pd.to_numeric(
+                    st.session_state.expenses["Amount"], errors="coerce"
+                ).fillna(0.0)
                 save_data()
                 added = len(st.session_state.expenses) - before
                 st.sidebar.success(f"Successfully imported {added} expenses!")
@@ -144,7 +161,7 @@ if uploaded_file is not None:
         st.sidebar.error(f"Error reading file: {e}")
 
 # ======================
-# Sidebar - Filters (Year + Month)
+# Sidebar - Filters
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("🔍 Filters")
@@ -156,14 +173,10 @@ if not st.session_state.expenses.empty:
     st.session_state.expenses["Year"] = st.session_state.expenses["Date"].dt.year
     st.session_state.expenses["Month"] = st.session_state.expenses["Date"].dt.month
 
-    years = sorted(
-        st.session_state.expenses["Year"].dropna().astype(int).unique()
-    )
+    years = sorted(st.session_state.expenses["Year"].dropna().astype(int).unique())
     selected_year = st.sidebar.selectbox("Year", options=["All"] + list(years))
 
-    months = sorted(
-        st.session_state.expenses["Month"].dropna().astype(int).unique()
-    )
+    months = sorted(st.session_state.expenses["Month"].dropna().astype(int).unique())
     month_names = {m: calendar.month_name[m] for m in months}
     month_options = ["All"] + [month_names[m] for m in months]
     selected_month = st.sidebar.selectbox("Month", options=month_options)
@@ -172,7 +185,6 @@ if not st.session_state.expenses.empty:
 
     if selected_year != "All":
         filtered_df = filtered_df[filtered_df["Year"] == int(selected_year)]
-
     if selected_month != "All":
         month_num = [k for k, v in month_names.items() if v == selected_month][0]
         filtered_df = filtered_df[filtered_df["Month"] == month_num]
@@ -185,10 +197,15 @@ else:
 st.title("💰 Expense Tracker")
 st.markdown(f"Welcome, **{USER}**! Record and manage your daily expenses easily.")
 
-# Summary
+# Summary (FIXED)
 if not filtered_df.empty:
+    # Ensure Amount is numeric before summing
+    filtered_df["Amount"] = pd.to_numeric(filtered_df["Amount"], errors="coerce").fillna(0.0)
     total = filtered_df["Amount"].sum()
-    st.metric("Total Spent", f"${total:,.2f}")
+
+    # Safe formatting
+    total_display = f"${total:,.2f}" if pd.notna(total) else "$0.00"
+    st.metric("Total Spent", total_display)
 
     by_category = (
         filtered_df.groupby("Category")["Amount"]
@@ -220,12 +237,10 @@ st.markdown("---")
 st.subheader("All Expenses (Filtered)")
 
 if not filtered_df.empty:
-    # Keep original index so we can delete correctly from the main DataFrame
-    display_df = filtered_df.copy()
-    display_df = display_df.reset_index()  # 'index' column = original index in st.session_state.expenses
+    display_df = filtered_df.copy().reset_index()  # keep original index
     display_df.insert(0, "Select", False)
 
-    # Format Amount for display only
+    # Format Amount only for display
     display_df["Amount"] = display_df["Amount"].map(lambda x: f"{float(x):,.2f}")
 
     edited_df = st.data_editor(
@@ -235,12 +250,11 @@ if not filtered_df.empty:
         disabled=[col for col in display_df.columns if col != "Select"],
         key="expense_editor",
         column_config={
-            "Select": st.column_config.CheckboxColumn(required=True),
-            "index": None,          # hide the original index column
+            "Select": st.column_config.CheckboxColumn("Select", default=False),
+            "index": None,  # hide internal index
         }
     )
 
-    # ---------- Delete Selected ----------
     selected_rows = edited_df[edited_df["Select"] == True]
 
     col_del1, col_del2, _ = st.columns([1, 1, 3])
@@ -251,13 +265,13 @@ if not filtered_df.empty:
                 st.warning("Please select at least one expense to delete.")
             else:
                 indices_to_drop = selected_rows["index"].tolist()
-                st.session_state.expenses = st.session_state.expenses.drop(indices_to_drop)
-                st.session_state.expenses = st.session_state.expenses.reset_index(drop=True)
+                st.session_state.expenses = st.session_state.expenses.drop(
+                    indices_to_drop, errors="ignore"
+                ).reset_index(drop=True)
                 save_data()
                 st.success(f"Deleted {len(indices_to_drop)} expense(s).")
                 st.rerun()
 
-    # ---------- Delete All ----------
     with col_del2:
         if st.button("💥 Delete All", type="secondary", use_container_width=True):
             st.session_state.confirm_delete_all = True
@@ -276,6 +290,5 @@ if not filtered_df.empty:
             if st.button("❌ Cancel"):
                 st.session_state.confirm_delete_all = False
                 st.rerun()
-
 else:
     st.info("No expenses to display.")
