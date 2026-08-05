@@ -21,23 +21,14 @@ os.makedirs(DATA_DIR, exist_ok=True)
 USER_FILE = os.path.join(DATA_DIR, f"{USER}_expenses.csv")
 
 # ======================
-# Helper: Clean Amount (handles commas, currency symbols, etc.)
+# Helper: Clean Amount
 # ======================
 def clean_amount(series):
-    """Convert Amount column safely, even if it contains commas or $ signs."""
     if series is None or len(series) == 0:
         return series
-
-    # Convert to string first
     s = series.astype(str)
-
-    # Remove currency symbols, spaces, and thousand separators
     s = s.str.replace(r"[$,€£¥\s]", "", regex=True)
-
-    # Keep only numbers, decimal point and minus
     s = s.str.replace(r"[^0-9.\-]", "", regex=True)
-
-    # Convert to numeric
     return pd.to_numeric(s, errors="coerce").fillna(0.0)
 
 # ======================
@@ -58,7 +49,6 @@ if "expenses" not in st.session_state:
     else:
         st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
 
-# Always clean Amount
 st.session_state.expenses["Amount"] = clean_amount(st.session_state.expenses["Amount"])
 
 def save_data():
@@ -118,7 +108,7 @@ st.sidebar.header("📥 Upload Expenses")
 uploaded_file = st.sidebar.file_uploader(
     "Upload CSV file",
     type=["csv"],
-    help="Preferred columns: Date, Category, Amount (others optional)"
+    help="Preferred columns: Date, Category, Amount"
 )
 
 if uploaded_file is not None:
@@ -129,8 +119,7 @@ if uploaded_file is not None:
         min_required = {"Date", "Category", "Amount"}
         if not min_required.issubset(set(import_df.columns)):
             st.sidebar.error(
-                f"Missing required columns.\n"
-                f"Need at least: Date, Category, Amount\n"
+                f"Missing required columns.\nNeed at least: Date, Category, Amount\n"
                 f"Found: {', '.join(import_df.columns)}"
             )
         else:
@@ -146,10 +135,8 @@ if uploaded_file is not None:
                     import_df[col] = default
 
             import_df = import_df[[c for c in COLUMNS if c in import_df.columns]].copy()
-
-            # ★★★ Clean Amount properly (handles 1,234.56) ★★★
             import_df["Amount"] = clean_amount(import_df["Amount"])
-            import_df = import_df[import_df["Amount"] > 0]   # remove zero/invalid
+            import_df = import_df[import_df["Amount"] > 0]
 
             for col in COLUMNS:
                 if col not in import_df.columns:
@@ -203,6 +190,8 @@ if not st.session_state.expenses.empty:
         filtered_df = filtered_df[filtered_df["Month"] == month_num]
 else:
     filtered_df = st.session_state.expenses.copy()
+    selected_year = "All"
+    selected_month = "All"
 
 # ======================
 # Main Area
@@ -210,7 +199,7 @@ else:
 st.title("💰 Expense Tracker")
 st.markdown(f"Welcome, **{USER}**! Record and manage your daily expenses easily.")
 
-# Summary
+# Summary Metrics
 if not filtered_df.empty:
     filtered_df["Amount"] = clean_amount(filtered_df["Amount"])
     total = filtered_df["Amount"].sum()
@@ -241,13 +230,79 @@ else:
 st.markdown("---")
 
 # ======================
+# Monthly Expense Charts (NEW)
+# ======================
+st.subheader("📅 Monthly Expense Charts")
+
+if not st.session_state.expenses.empty:
+    # Prepare data for monthly charts (use full data or filtered by year)
+    chart_df = st.session_state.expenses.copy()
+    chart_df["Amount"] = clean_amount(chart_df["Amount"])
+    chart_df["Date"] = pd.to_datetime(chart_df["Date"], errors="coerce")
+    chart_df = chart_df.dropna(subset=["Date"])
+
+    # Apply Year filter for charts if selected
+    if selected_year != "All":
+        chart_df = chart_df[chart_df["Date"].dt.year == int(selected_year)]
+
+    if not chart_df.empty:
+        # Create Year-Month period
+        chart_df["YearMonth"] = chart_df["Date"].dt.to_period("M").astype(str)
+        chart_df["MonthName"] = chart_df["Date"].dt.strftime("%b %Y")
+
+        # 1. Total Monthly Spending
+        monthly_total = (
+            chart_df.groupby("YearMonth")["Amount"]
+            .sum()
+            .sort_index()
+        )
+
+        st.markdown("### Total Spending by Month")
+        st.bar_chart(monthly_total, use_container_width=True)
+
+        # Show numbers under the chart
+        monthly_table = monthly_total.reset_index()
+        monthly_table.columns = ["Month", "Total ($)"]
+        monthly_table["Total ($)"] = monthly_table["Total ($)"].map(lambda x: f"${x:,.2f}")
+        st.dataframe(monthly_table, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+
+        # 2. Monthly Spending by Category
+        st.markdown("### Monthly Spending by Category")
+
+        monthly_cat = (
+            chart_df.groupby(["YearMonth", "Category"])["Amount"]
+            .sum()
+            .unstack(fill_value=0)
+            .sort_index()
+        )
+
+        if not monthly_cat.empty:
+            st.bar_chart(monthly_cat, use_container_width=True)
+
+            # Optional: show the data table
+            with st.expander("View Monthly Category Breakdown"):
+                st.dataframe(
+                    monthly_cat.style.format("{:,.2f}"),
+                    use_container_width=True
+                )
+        else:
+            st.info("Not enough data for category breakdown.")
+    else:
+        st.info("No data available for the selected year.")
+else:
+    st.info("Add some expenses to see monthly charts.")
+
+st.markdown("---")
+
+# ======================
 # All Expenses Table
 # ======================
 st.subheader("All Expenses (Filtered)")
 
 display_df = filtered_df.copy().reset_index(drop=True)
 
-# Convert Date to string
 if "Date" in display_df.columns:
     display_df["Date"] = pd.to_datetime(display_df["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
     display_df["Date"] = display_df["Date"].fillna("")
@@ -258,7 +313,6 @@ for col in ["User", "Category", "Vendor", "Description", "Remark", "Source"]:
     if col in display_df.columns:
         display_df[col] = display_df[col].fillna("").astype(str)
 
-# Add Row Number + Select
 display_df.insert(0, "No.", range(1, len(display_df) + 1))
 display_df.insert(1, "Select", False)
 
@@ -277,7 +331,7 @@ edited_df = st.data_editor(
         "Amount": st.column_config.NumberColumn(
             "Amount ($)",
             min_value=0.0,
-            format="%,.2f",          # ← shows 1,234.56 nicely
+            format="%,.2f",
             required=True
         ),
         "Vendor": st.column_config.TextColumn("Vendor"),
