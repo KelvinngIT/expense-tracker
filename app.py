@@ -206,7 +206,7 @@ else:
 st.markdown("---")
 
 # ======================
-# All Expenses + Deletion + Download
+# All Expenses + Deletion
 # ======================
 st.subheader("All Expenses (Filtered)")
 
@@ -224,20 +224,3 @@ if not filtered_df.empty:
         disabled=[col for col in display_df.columns if col != "Select"],
         key="expense_editor"
     )
-
-    st.markdown("### Delete / Download Options")
-
-    col_del1, col_del2, col_del3 = st.columns([2, 2, 2])
-
-    # Delete selected rows
-    with col_del1:
-        if st.button("🗑️ Delete Selected Rows", type="primary", use_container_width=True):
-            selected_indices = edited_df[edited_df["Select"]].index.tolist()
-            if not selected_indices:
-                st.warning("No rows selected.")
-            else:
-                st.session_state.expenses = (
-                    st.session_state.expenses.drop(selected_indices).reset_index(drop=True)
-                )
-                save_data()
-                st.success(f
