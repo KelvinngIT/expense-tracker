@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
-import calendar   # cleaner way to get month names
+import calendar
 
 # Page config
 st.set_page_config(
@@ -144,20 +144,18 @@ if uploaded_file is not None:
         st.sidebar.error(f"Error reading file: {e}")
 
 # ======================
-# Sidebar - Filters (Year + Month)  ← FIXED HERE
+# Sidebar - Filters (Year + Month)
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("🔍 Filters")
 
 if not st.session_state.expenses.empty:
-    # Ensure Date is datetime
     st.session_state.expenses["Date"] = pd.to_datetime(
         st.session_state.expenses["Date"], errors="coerce"
     )
     st.session_state.expenses["Year"] = st.session_state.expenses["Date"].dt.year
     st.session_state.expenses["Month"] = st.session_state.expenses["Date"].dt.month
 
-    # Convert to plain Python int to avoid TypeError with datetime / calendar
     years = sorted(
         st.session_state.expenses["Year"].dropna().astype(int).unique()
     )
@@ -166,7 +164,6 @@ if not st.session_state.expenses.empty:
     months = sorted(
         st.session_state.expenses["Month"].dropna().astype(int).unique()
     )
-    # Using calendar is cleaner and safer than datetime(2000, i, 1)
     month_names = {m: calendar.month_name[m] for m in months}
     month_options = ["All"] + [month_names[m] for m in months]
     selected_month = st.sidebar.selectbox("Month", options=month_options)
@@ -223,10 +220,12 @@ st.markdown("---")
 st.subheader("All Expenses (Filtered)")
 
 if not filtered_df.empty:
+    # Keep original index so we can delete correctly from the main DataFrame
     display_df = filtered_df.copy()
+    display_df = display_df.reset_index()  # 'index' column = original index in st.session_state.expenses
     display_df.insert(0, "Select", False)
 
-    # Format Amount for display
+    # Format Amount for display only
     display_df["Amount"] = display_df["Amount"].map(lambda x: f"{float(x):,.2f}")
 
     edited_df = st.data_editor(
@@ -234,5 +233,49 @@ if not filtered_df.empty:
         hide_index=True,
         use_container_width=True,
         disabled=[col for col in display_df.columns if col != "Select"],
-        key="expense_editor"
+        key="expense_editor",
+        column_config={
+            "Select": st.column_config.CheckboxColumn(required=True),
+            "index": None,          # hide the original index column
+        }
     )
+
+    # ---------- Delete Selected ----------
+    selected_rows = edited_df[edited_df["Select"] == True]
+
+    col_del1, col_del2, _ = st.columns([1, 1, 3])
+
+    with col_del1:
+        if st.button("🗑️ Delete Selected", type="primary", use_container_width=True):
+            if selected_rows.empty:
+                st.warning("Please select at least one expense to delete.")
+            else:
+                indices_to_drop = selected_rows["index"].tolist()
+                st.session_state.expenses = st.session_state.expenses.drop(indices_to_drop)
+                st.session_state.expenses = st.session_state.expenses.reset_index(drop=True)
+                save_data()
+                st.success(f"Deleted {len(indices_to_drop)} expense(s).")
+                st.rerun()
+
+    # ---------- Delete All ----------
+    with col_del2:
+        if st.button("💥 Delete All", type="secondary", use_container_width=True):
+            st.session_state.confirm_delete_all = True
+
+    if st.session_state.get("confirm_delete_all", False):
+        st.warning("⚠️ Are you sure you want to delete **ALL** expenses? This cannot be undone.")
+        c1, c2, _ = st.columns([1, 1, 3])
+        with c1:
+            if st.button("✅ Yes, Delete Everything", type="primary"):
+                st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
+                save_data()
+                st.session_state.confirm_delete_all = False
+                st.success("All expenses have been deleted.")
+                st.rerun()
+        with c2:
+            if st.button("❌ Cancel"):
+                st.session_state.confirm_delete_all = False
+                st.rerun()
+
+else:
+    st.info("No expenses to display.")
