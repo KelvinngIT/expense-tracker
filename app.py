@@ -360,3 +360,89 @@ edited_df = st.data_editor(
     key="expense_editor",
     column_config={
         "No.": st.column_config.NumberColumn("No.", width="small", disabled=True),
+        "Select": st.column_config.CheckboxColumn("Select", default=False),
+        "Date": st.column_config.TextColumn("Date"),
+        "User": st.column_config.TextColumn("User"),
+        "Category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True),
+        "Amount": st.column_config.NumberColumn(
+            "Amount ($)",
+            min_value=0.0,
+            format="%,.2f",
+            required=True
+        ),
+        "Vendor": st.column_config.TextColumn("Vendor"),
+        "Description": st.column_config.TextColumn("Description"),
+        "Remark": st.column_config.TextColumn("Remark"),
+        "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
+    }
+)
+
+# ---------- Buttons ----------
+col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
+
+with col_save:
+    if st.button("💾 Save Changes / Add Rows", type="primary", use_container_width=True):
+        clean_df = edited_df.drop(columns=["Select", "No."], errors="ignore").copy()
+        clean_df["Amount"] = clean_amount(clean_df["Amount"])
+        clean_df["User"] = clean_df["User"].fillna(USER).astype(str)
+        clean_df["Vendor"] = clean_df["Vendor"].fillna("-").astype(str)
+        clean_df["Description"] = clean_df["Description"].fillna("-").astype(str)
+        clean_df["Remark"] = clean_df["Remark"].fillna("-").astype(str)
+        clean_df["Source"] = clean_df["Source"].fillna("Manual").astype(str)
+        clean_df["Category"] = clean_df["Category"].fillna("").astype(str)
+        clean_df["Date"] = clean_df["Date"].fillna("").astype(str)
+
+        clean_df = clean_df[
+            (clean_df["Category"].str.strip() != "") &
+            (clean_df["Amount"] > 0)
+        ]
+
+        if selected_year == "All" and selected_month == "All":
+            st.session_state.expenses = clean_df[COLUMNS].reset_index(drop=True)
+            save_data()
+            st.success("Changes and new rows saved successfully!")
+            st.rerun()
+        else:
+            st.warning("Please set Year & Month to **All** before saving.")
+
+with col_del:
+    if st.button("🗑️ Delete Selected", use_container_width=True):
+        selected_mask = edited_df["Select"] == True
+        if not selected_mask.any():
+            st.warning("Please select at least one row.")
+        else:
+            to_delete = edited_df[selected_mask]
+            original = st.session_state.expenses.copy()
+
+            for _, row in to_delete.iterrows():
+                mask = (
+                    (original["Date"].astype(str).str[:10] == str(row["Date"])[:10]) &
+                    (original["Category"] == row["Category"]) &
+                    (original["Amount"] == float(row["Amount"])) &
+                    (original["Vendor"].astype(str) == str(row["Vendor"]))
+                )
+                original = original[~mask]
+
+            st.session_state.expenses = original.reset_index(drop=True)
+            save_data()
+            st.success(f"Deleted {selected_mask.sum()} expense(s).")
+            st.rerun()
+
+with col_del_all:
+    if st.button("💥 Delete All", use_container_width=True):
+        st.session_state.confirm_delete_all = True
+
+if st.session_state.get("confirm_delete_all", False):
+    st.warning("⚠️ Are you sure you want to delete **ALL** expenses?")
+    c1, c2, _ = st.columns([1, 1, 3])
+    with c1:
+        if st.button("✅ Yes, Delete Everything", type="primary"):
+            st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
+            save_data()
+            st.session_state.confirm_delete_all = False
+            st.success("All expenses deleted.")
+            st.rerun()
+    with c2:
+        if st.button("❌ Cancel"):
+            st.session_state.confirm_delete_all = False
+            st.rerun()
