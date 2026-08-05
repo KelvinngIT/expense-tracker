@@ -23,7 +23,7 @@ USER_FILE = os.path.join(DATA_DIR, f"{USER}_expenses.csv")
 # ======================
 COLUMNS = [
     "Date", "Period", "User", "Category", "Amount",
-    "Vendor", "Description", "Remark", "Source"
+    "Vendor", "Description", "Remark", "agreement","Source"
 ]
 
 if "expenses" not in st.session_state:
