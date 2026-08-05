@@ -41,6 +41,10 @@ if "expenses" not in st.session_state:
                 else:
                     st.session_state.expenses[col] = ""
         st.session_state.expenses = st.session_state.expenses[COLUMNS]
+        # Force Amount to numeric
+        st.session_state.expenses["Amount"] = pd.to_numeric(
+            st.session_state.expenses["Amount"], errors="coerce"
+        ).fillna(0.0)
     else:
         st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
 
@@ -55,7 +59,6 @@ CATEGORIES = [
 
 SOURCES = ["Manual", "Bank", "Credit Card", "Cash", "Import", "Other"]
 
-# Helper: current period (YYYY-MM)
 current_period = datetime.now().strftime("%Y-%m")
 
 # ======================
@@ -109,10 +112,8 @@ uploaded_file = st.sidebar.file_uploader(
 if uploaded_file is not None:
     try:
         import_df = pd.read_csv(uploaded_file)
-        # Normalize column names
         import_df.columns = import_df.columns.str.strip().str.title()
         
-        # Required minimum columns
         min_required = {"Date", "Category", "Amount"}
         if not min_required.issubset(set(import_df.columns)):
             st.sidebar.error(
@@ -120,7 +121,6 @@ if uploaded_file is not None:
                 f"Found: {', '.join(import_df.columns)}"
             )
         else:
-            # Add missing optional columns with defaults
             defaults = {
                 "Period": current_period,
                 "User": USER,
@@ -133,7 +133,6 @@ if uploaded_file is not None:
                 if col not in import_df.columns:
                     import_df[col] = default
             
-            # Keep only the standard columns and clean
             import_df = import_df[COLUMNS].copy()
             import_df["Amount"] = pd.to_numeric(import_df["Amount"], errors="coerce")
             import_df = import_df.dropna(subset=["Amount"])
@@ -164,7 +163,7 @@ st.markdown(f"Welcome, **{USER}**! Record and manage your daily expenses easily.
 # Summary
 if not st.session_state.expenses.empty:
     total = st.session_state.expenses["Amount"].sum()
-    st.metric("Total Spent", f"${total:.2f}")
+    st.metric("Total Spent", f"${total:,.2f}")
     
     by_category = (
         st.session_state.expenses
@@ -189,44 +188,68 @@ else:
 
 st.divider()
 
-# All Expenses Table
+# ======================
+# All Expenses + Deletion
+# ======================
 st.subheader("All Expenses")
+
 if not st.session_state.expenses.empty:
+    # Prepare dataframe with Select checkbox
     display_df = st.session_state.expenses.copy()
-    display_df.index.name = "Index"
-    st.dataframe(display_df, use_container_width=True)
-    
-    # Delete section
-    st.markdown("### Delete Expense")
-    col_a, col_b = st.columns([1, 3])
-    with col_a:
-        delete_idx = st.number_input(
-            "Index to delete",
-            min_value=0,
-            max_value=len(st.session_state.expenses) - 1,
-            step=1
-        )
-    with col_b:
-        if st.button("🗑️ Delete Selected", type="secondary"):
-            removed = st.session_state.expenses.iloc[int(delete_idx)]
-            st.session_state.expenses = (
-                st.session_state.expenses
-                .drop(int(delete_idx))
-                .reset_index(drop=True)
-            )
-            save_data()
-            st.success(f"Deleted: {removed['Category']} - ${removed['Amount']:.2f}")
-            st.rerun()
-    
-    # Clear all + Download
-    col_c, col_d = st.columns(2)
-    with col_c:
-        if st.button("🧹 Clear All Expenses", type="primary"):
-            st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
-            save_data()
-            st.success("All expenses cleared!")
-            st.rerun()
-    with col_d:
+    display_df.insert(0, "Select", False)
+
+    edited_df = st.data_editor(
+        display_df,
+        hide_index=True,
+        use_container_width=True,
+        disabled=[col for col in display_df.columns if col != "Select"],
+        key="expense_editor"
+    )
+
+    st.markdown("### Delete Options")
+
+    col_del1, col_del2, col_del3 = st.columns([2, 2, 2])
+
+    with col_del1:
+        if st.button("🗑️ Delete Selected Rows", type="primary", use_container_width=True):
+            selected_indices = edited_df[edited_df["Select"]].index.tolist()
+            if not selected_indices:
+                st.warning("No rows selected.")
+            else:
+                st.session_state.expenses = (
+                    st.session_state.expenses
+                    .drop(selected_indices)
+                    .reset_index(drop=True)
+                )
+                save_data()
+                st.success(f"Deleted {len(selected_indices)} expense(s).")
+                st.rerun()
+
+    with col_del2:
+        # Two-step Delete All
+        if "confirm_delete_all" not in st.session_state:
+            st.session_state.confirm_delete_all = False
+
+        if not st.session_state.confirm_delete_all:
+            if st.button("🧹 Delete All Expenses", type="secondary", use_container_width=True):
+                st.session_state.confirm_delete_all = True
+                st.rerun()
+        else:
+            st.warning("⚠️ Are you sure you want to delete ALL expenses?")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✅ Yes, Delete All", type="primary", use_container_width=True):
+                    st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
+                    save_data()
+                    st.session_state.confirm_delete_all = False
+                    st.success("All expenses have been deleted.")
+                    st.rerun()
+            with c2:
+                if st.button("❌ Cancel", use_container_width=True):
+                    st.session_state.confirm_delete_all = False
+                    st.rerun()
+
+    with col_del3:
         csv = st.session_state.expenses.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="⬇️ Download CSV",
@@ -235,6 +258,7 @@ if not st.session_state.expenses.empty:
             mime="text/csv",
             use_container_width=True
         )
+
 else:
     st.write("No data to display.")
 
