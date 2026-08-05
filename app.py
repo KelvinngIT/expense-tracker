@@ -246,7 +246,4 @@ if not filtered_df.empty:
 
         if not st.session_state.confirm_delete_all:
             if st.button("🧹 Delete All Expenses", type="secondary", use_container_width=True):
-                st.session_state.confirm_delete_all = True
-                st.rerun()
-        else:
-            st.warning("⚠️ Are you sure you want to
+                st.session_state.confirm_delete_all
