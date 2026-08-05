@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
+import calendar   # cleaner way to get month names
 
 # Page config
 st.set_page_config(
@@ -54,6 +55,7 @@ SOURCES = ["Manual", "Bank", "Credit Card", "Cash", "Import", "Other"]
 # Sidebar - Add Expense
 # ======================
 st.sidebar.header("➕ Add New Expense")
+
 with st.sidebar.form("expense_form", clear_on_submit=True):
     date = st.date_input("Date", value=datetime.now())
     category = st.selectbox("Category", CATEGORIES)
@@ -63,7 +65,7 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
     remark = st.text_input("Remark", placeholder="Optional notes...")
     source = st.selectbox("Source", SOURCES, index=0)
     submitted = st.form_submit_button("Add Expense", use_container_width=True)
-    
+
     if submitted:
         if amount <= 0:
             st.error("Please enter a valid amount (> 0)")
@@ -90,6 +92,7 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("📥 Upload Expenses")
+
 uploaded_file = st.sidebar.file_uploader(
     "Upload CSV file",
     type=["csv"],
@@ -100,7 +103,7 @@ if uploaded_file is not None:
     try:
         import_df = pd.read_csv(uploaded_file)
         import_df.columns = import_df.columns.str.strip().str.title()
-        
+
         min_required = {"Date", "Category", "Amount"}
         if not min_required.issubset(set(import_df.columns)):
             st.sidebar.error(
@@ -118,15 +121,15 @@ if uploaded_file is not None:
             for col, default in defaults.items():
                 if col not in import_df.columns:
                     import_df[col] = default
-            
+
             import_df = import_df[COLUMNS].copy()
             import_df["Amount"] = pd.to_numeric(import_df["Amount"], errors="coerce")
             import_df = import_df.dropna(subset=["Amount"])
             import_df["Amount"] = import_df["Amount"].astype(float)
-            
+
             for col in COLUMNS:
                 import_df[col] = import_df[col].fillna(defaults.get(col, "-")).astype(str)
-            
+
             if st.sidebar.button("Import Data", use_container_width=True, type="primary"):
                 before = len(st.session_state.expenses)
                 st.session_state.expenses = pd.concat(
@@ -141,29 +144,38 @@ if uploaded_file is not None:
         st.sidebar.error(f"Error reading file: {e}")
 
 # ======================
-# Sidebar - Filters (Year + Month)
+# Sidebar - Filters (Year + Month)  ← FIXED HERE
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("🔍 Filters")
 
 if not st.session_state.expenses.empty:
+    # Ensure Date is datetime
     st.session_state.expenses["Date"] = pd.to_datetime(
         st.session_state.expenses["Date"], errors="coerce"
     )
     st.session_state.expenses["Year"] = st.session_state.expenses["Date"].dt.year
     st.session_state.expenses["Month"] = st.session_state.expenses["Date"].dt.month
 
-    years = sorted(st.session_state.expenses["Year"].dropna().unique())
-    selected_year = st.sidebar.selectbox("Year", options=["All"] + years)
+    # Convert to plain Python int to avoid TypeError with datetime / calendar
+    years = sorted(
+        st.session_state.expenses["Year"].dropna().astype(int).unique()
+    )
+    selected_year = st.sidebar.selectbox("Year", options=["All"] + list(years))
 
-    months = sorted(st.session_state.expenses["Month"].dropna().unique())
-    month_names = {i: datetime(2000, i, 1).strftime("%B") for i in months}
+    months = sorted(
+        st.session_state.expenses["Month"].dropna().astype(int).unique()
+    )
+    # Using calendar is cleaner and safer than datetime(2000, i, 1)
+    month_names = {m: calendar.month_name[m] for m in months}
     month_options = ["All"] + [month_names[m] for m in months]
     selected_month = st.sidebar.selectbox("Month", options=month_options)
 
     filtered_df = st.session_state.expenses.copy()
+
     if selected_year != "All":
-        filtered_df = filtered_df[filtered_df["Year"] == selected_year]
+        filtered_df = filtered_df[filtered_df["Year"] == int(selected_year)]
+
     if selected_month != "All":
         month_num = [k for k, v in month_names.items() if v == selected_month][0]
         filtered_df = filtered_df[filtered_df["Month"] == month_num]
@@ -179,21 +191,21 @@ st.markdown(f"Welcome, **{USER}**! Record and manage your daily expenses easily.
 # Summary
 if not filtered_df.empty:
     total = filtered_df["Amount"].sum()
-    st.metric("Total Spent", f"${total:,.2f}")  # formatted as 000,000.00
-    
+    st.metric("Total Spent", f"${total:,.2f}")
+
     by_category = (
         filtered_df.groupby("Category")["Amount"]
         .sum()
         .sort_values(ascending=False)
     )
-    
+
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Spending by Category")
         st.dataframe(
             by_category.reset_index()
             .rename(columns={"Amount": "Total ($)"})
-            .style.format({"Total ($)": "{:,.2f}"}),  # formatted values
+            .style.format({"Total ($)": "{:,.2f}"}),
             use_container_width=True,
             hide_index=True
         )
@@ -214,7 +226,7 @@ if not filtered_df.empty:
     display_df = filtered_df.copy()
     display_df.insert(0, "Select", False)
 
-    # Format Amount column with thousands separator and 2 decimals
+    # Format Amount for display
     display_df["Amount"] = display_df["Amount"].map(lambda x: f"{float(x):,.2f}")
 
     edited_df = st.data_editor(
