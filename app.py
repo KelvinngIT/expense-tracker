@@ -224,23 +224,27 @@ else:
 st.markdown("---")
 
 # ======================
-# All Expenses + Row Numbers + Add / Edit / Delete
+# All Expenses Table (Fixed)
 # ======================
 st.subheader("All Expenses (Filtered)")
 
-# Always show the editor (even if empty)
+# Prepare clean display dataframe
 display_df = filtered_df.copy().reset_index(drop=True)
 
-# Add Row Number column
+# Convert Date to string (VERY IMPORTANT for data_editor)
+if "Date" in display_df.columns:
+    display_df["Date"] = pd.to_datetime(display_df["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    display_df["Date"] = display_df["Date"].fillna("")
+
+# Force correct types
+display_df["Amount"] = pd.to_numeric(display_df["Amount"], errors="coerce").fillna(0.0)
+for col in ["User", "Category", "Vendor", "Description", "Remark", "Source"]:
+    if col in display_df.columns:
+        display_df[col] = display_df[col].fillna("").astype(str)
+
+# Add Row Number + Select
 display_df.insert(0, "No.", range(1, len(display_df) + 1))
 display_df.insert(1, "Select", False)
-
-# Ensure all required columns exist
-for col in COLUMNS:
-    if col not in display_df.columns:
-        display_df[col] = ""
-
-display_df["Amount"] = pd.to_numeric(display_df["Amount"], errors="coerce").fillna(0.0)
 
 edited_df = st.data_editor(
     display_df,
@@ -250,25 +254,31 @@ edited_df = st.data_editor(
     key="expense_editor",
     column_config={
         "No.": st.column_config.NumberColumn(
-            "No.", 
+            "No.",
             width="small",
-            disabled=True,          # row number is read-only
-            help="Row number"
+            disabled=True,
+            help="Row number (auto)"
         ),
         "Select": st.column_config.CheckboxColumn("Select", default=False),
-        "Date": st.column_config.TextColumn("Date"),
+        "Date": st.column_config.TextColumn("Date", help="YYYY-MM-DD"),
         "User": st.column_config.TextColumn("User"),
         "Category": st.column_config.SelectboxColumn(
-            "Category", options=CATEGORIES, required=True
+            "Category",
+            options=CATEGORIES,
+            required=True
         ),
         "Amount": st.column_config.NumberColumn(
-            "Amount ($)", min_value=0.0, format="%.2f", required=True
+            "Amount ($)",
+            min_value=0.0,
+            format="%.2f",
+            required=True
         ),
         "Vendor": st.column_config.TextColumn("Vendor"),
         "Description": st.column_config.TextColumn("Description"),
         "Remark": st.column_config.TextColumn("Remark"),
         "Source": st.column_config.SelectboxColumn(
-            "Source", options=SOURCES
+            "Source",
+            options=SOURCES
         ),
     }
 )
@@ -279,17 +289,20 @@ col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
 with col_save:
     if st.button("💾 Save Changes / Add Rows", type="primary", use_container_width=True):
         clean_df = edited_df.drop(columns=["Select", "No."], errors="ignore").copy()
+
+        # Clean types again
         clean_df["Amount"] = pd.to_numeric(clean_df["Amount"], errors="coerce").fillna(0.0)
-        clean_df["User"] = clean_df["User"].fillna(USER)
-        clean_df["Vendor"] = clean_df["Vendor"].fillna("-")
-        clean_df["Description"] = clean_df["Description"].fillna("-")
-        clean_df["Remark"] = clean_df["Remark"].fillna("-")
-        clean_df["Source"] = clean_df["Source"].fillna("Manual")
+        clean_df["User"] = clean_df["User"].fillna(USER).astype(str)
+        clean_df["Vendor"] = clean_df["Vendor"].fillna("-").astype(str)
+        clean_df["Description"] = clean_df["Description"].fillna("-").astype(str)
+        clean_df["Remark"] = clean_df["Remark"].fillna("-").astype(str)
+        clean_df["Source"] = clean_df["Source"].fillna("Manual").astype(str)
+        clean_df["Category"] = clean_df["Category"].fillna("").astype(str)
+        clean_df["Date"] = clean_df["Date"].fillna("").astype(str)
 
         # Keep only valid rows
         clean_df = clean_df[
-            (clean_df["Category"].notna()) &
-            (clean_df["Category"] != "") &
+            (clean_df["Category"].str.strip() != "") &
             (clean_df["Amount"] > 0)
         ]
 
@@ -300,8 +313,8 @@ with col_save:
             st.rerun()
         else:
             st.warning(
-                "You currently have filters applied. "
-                "Please set Year and Month to **All** before saving new/edited rows."
+                "Filters are currently applied. "
+                "Please set **Year** and **Month** to **All** before saving new or edited rows."
             )
 
 with col_del:
@@ -315,10 +328,10 @@ with col_del:
 
             for _, row in to_delete.iterrows():
                 mask = (
-                    (original["Date"].astype(str) == str(row["Date"])) &
+                    (original["Date"].astype(str).str[:10] == str(row["Date"])[:10]) &
                     (original["Category"] == row["Category"]) &
                     (original["Amount"] == float(row["Amount"])) &
-                    (original["Vendor"] == row["Vendor"])
+                    (original["Vendor"].astype(str) == str(row["Vendor"]))
                 )
                 original = original[~mask]
 
