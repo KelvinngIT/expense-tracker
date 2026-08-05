@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 import os
 import calendar
+import re
 
 # Page config
 st.set_page_config(
@@ -18,6 +19,26 @@ USER = st.sidebar.text_input("Enter your username", value="guest")
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 USER_FILE = os.path.join(DATA_DIR, f"{USER}_expenses.csv")
+
+# ======================
+# Helper: Clean Amount (handles commas, currency symbols, etc.)
+# ======================
+def clean_amount(series):
+    """Convert Amount column safely, even if it contains commas or $ signs."""
+    if series is None or len(series) == 0:
+        return series
+
+    # Convert to string first
+    s = series.astype(str)
+
+    # Remove currency symbols, spaces, and thousand separators
+    s = s.str.replace(r"[$,€£¥\s]", "", regex=True)
+
+    # Keep only numbers, decimal point and minus
+    s = s.str.replace(r"[^0-9.\-]", "", regex=True)
+
+    # Convert to numeric
+    return pd.to_numeric(s, errors="coerce").fillna(0.0)
 
 # ======================
 # Load or Initialize Data
@@ -37,10 +58,8 @@ if "expenses" not in st.session_state:
     else:
         st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
 
-# Always force Amount to numeric
-st.session_state.expenses["Amount"] = pd.to_numeric(
-    st.session_state.expenses["Amount"], errors="coerce"
-).fillna(0.0)
+# Always clean Amount
+st.session_state.expenses["Amount"] = clean_amount(st.session_state.expenses["Amount"])
 
 def save_data():
     st.session_state.expenses.to_csv(USER_FILE, index=False)
@@ -127,9 +146,10 @@ if uploaded_file is not None:
                     import_df[col] = default
 
             import_df = import_df[[c for c in COLUMNS if c in import_df.columns]].copy()
-            import_df["Amount"] = pd.to_numeric(import_df["Amount"], errors="coerce")
-            import_df = import_df.dropna(subset=["Amount"])
-            import_df["Amount"] = import_df["Amount"].astype(float)
+
+            # ★★★ Clean Amount properly (handles 1,234.56) ★★★
+            import_df["Amount"] = clean_amount(import_df["Amount"])
+            import_df = import_df[import_df["Amount"] > 0]   # remove zero/invalid
 
             for col in COLUMNS:
                 if col not in import_df.columns:
@@ -145,9 +165,7 @@ if uploaded_file is not None:
                     [st.session_state.expenses, import_df],
                     ignore_index=True
                 )
-                st.session_state.expenses["Amount"] = pd.to_numeric(
-                    st.session_state.expenses["Amount"], errors="coerce"
-                ).fillna(0.0)
+                st.session_state.expenses["Amount"] = clean_amount(st.session_state.expenses["Amount"])
                 save_data()
                 added = len(st.session_state.expenses) - before
                 st.sidebar.success(f"Successfully imported {added} expenses!")
@@ -194,10 +212,9 @@ st.markdown(f"Welcome, **{USER}**! Record and manage your daily expenses easily.
 
 # Summary
 if not filtered_df.empty:
-    filtered_df["Amount"] = pd.to_numeric(filtered_df["Amount"], errors="coerce").fillna(0.0)
+    filtered_df["Amount"] = clean_amount(filtered_df["Amount"])
     total = filtered_df["Amount"].sum()
-    total_display = f"${total:,.2f}" if pd.notna(total) else "$0.00"
-    st.metric("Total Spent", total_display)
+    st.metric("Total Spent", f"${total:,.2f}")
 
     by_category = (
         filtered_df.groupby("Category")["Amount"]
@@ -224,20 +241,19 @@ else:
 st.markdown("---")
 
 # ======================
-# All Expenses Table (Fixed)
+# All Expenses Table
 # ======================
 st.subheader("All Expenses (Filtered)")
 
-# Prepare clean display dataframe
 display_df = filtered_df.copy().reset_index(drop=True)
 
-# Convert Date to string (VERY IMPORTANT for data_editor)
+# Convert Date to string
 if "Date" in display_df.columns:
     display_df["Date"] = pd.to_datetime(display_df["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
     display_df["Date"] = display_df["Date"].fillna("")
 
-# Force correct types
-display_df["Amount"] = pd.to_numeric(display_df["Amount"], errors="coerce").fillna(0.0)
+display_df["Amount"] = clean_amount(display_df["Amount"])
+
 for col in ["User", "Category", "Vendor", "Description", "Remark", "Source"]:
     if col in display_df.columns:
         display_df[col] = display_df[col].fillna("").astype(str)
@@ -253,45 +269,31 @@ edited_df = st.data_editor(
     use_container_width=True,
     key="expense_editor",
     column_config={
-        "No.": st.column_config.NumberColumn(
-            "No.",
-            width="small",
-            disabled=True,
-            help="Row number (auto)"
-        ),
+        "No.": st.column_config.NumberColumn("No.", width="small", disabled=True),
         "Select": st.column_config.CheckboxColumn("Select", default=False),
-        "Date": st.column_config.TextColumn("Date", help="YYYY-MM-DD"),
+        "Date": st.column_config.TextColumn("Date"),
         "User": st.column_config.TextColumn("User"),
-        "Category": st.column_config.SelectboxColumn(
-            "Category",
-            options=CATEGORIES,
-            required=True
-        ),
+        "Category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True),
         "Amount": st.column_config.NumberColumn(
             "Amount ($)",
             min_value=0.0,
-            format="%.2f",
+            format="%,.2f",          # ← shows 1,234.56 nicely
             required=True
         ),
         "Vendor": st.column_config.TextColumn("Vendor"),
         "Description": st.column_config.TextColumn("Description"),
         "Remark": st.column_config.TextColumn("Remark"),
-        "Source": st.column_config.SelectboxColumn(
-            "Source",
-            options=SOURCES
-        ),
+        "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
     }
 )
 
-# ---------- Action buttons ----------
+# ---------- Buttons ----------
 col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
 
 with col_save:
     if st.button("💾 Save Changes / Add Rows", type="primary", use_container_width=True):
         clean_df = edited_df.drop(columns=["Select", "No."], errors="ignore").copy()
-
-        # Clean types again
-        clean_df["Amount"] = pd.to_numeric(clean_df["Amount"], errors="coerce").fillna(0.0)
+        clean_df["Amount"] = clean_amount(clean_df["Amount"])
         clean_df["User"] = clean_df["User"].fillna(USER).astype(str)
         clean_df["Vendor"] = clean_df["Vendor"].fillna("-").astype(str)
         clean_df["Description"] = clean_df["Description"].fillna("-").astype(str)
@@ -300,7 +302,6 @@ with col_save:
         clean_df["Category"] = clean_df["Category"].fillna("").astype(str)
         clean_df["Date"] = clean_df["Date"].fillna("").astype(str)
 
-        # Keep only valid rows
         clean_df = clean_df[
             (clean_df["Category"].str.strip() != "") &
             (clean_df["Amount"] > 0)
@@ -312,16 +313,13 @@ with col_save:
             st.success("Changes and new rows saved successfully!")
             st.rerun()
         else:
-            st.warning(
-                "Filters are currently applied. "
-                "Please set **Year** and **Month** to **All** before saving new or edited rows."
-            )
+            st.warning("Please set Year & Month to **All** before saving.")
 
 with col_del:
     if st.button("🗑️ Delete Selected", use_container_width=True):
         selected_mask = edited_df["Select"] == True
         if not selected_mask.any():
-            st.warning("Please select at least one expense to delete.")
+            st.warning("Please select at least one row.")
         else:
             to_delete = edited_df[selected_mask]
             original = st.session_state.expenses.copy()
@@ -345,14 +343,14 @@ with col_del_all:
         st.session_state.confirm_delete_all = True
 
 if st.session_state.get("confirm_delete_all", False):
-    st.warning("⚠️ Are you sure you want to delete **ALL** expenses? This cannot be undone.")
+    st.warning("⚠️ Are you sure you want to delete **ALL** expenses?")
     c1, c2, _ = st.columns([1, 1, 3])
     with c1:
         if st.button("✅ Yes, Delete Everything", type="primary"):
             st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
             save_data()
             st.session_state.confirm_delete_all = False
-            st.success("All expenses have been deleted.")
+            st.success("All expenses deleted.")
             st.rerun()
     with c2:
         if st.button("❌ Cancel"):
