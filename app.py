@@ -23,25 +23,16 @@ USER_FILE = os.path.join(DATA_DIR, f"{USER}_expenses.csv")
 # ======================
 COLUMNS = [
     "Date", "Period", "User", "Category", "Amount",
-    "Vendor", "Description", "Remark", "Source"
+    "Vendor", "Description", "Remark", "Source", "Agreement"
 ]
 
 if "expenses" not in st.session_state:
     if os.path.exists(USER_FILE):
         st.session_state.expenses = pd.read_csv(USER_FILE)
-        # Ensure all required columns exist (for older files)
         for col in COLUMNS:
             if col not in st.session_state.expenses.columns:
-                if col == "User":
-                    st.session_state.expenses[col] = USER
-                elif col == "Period":
-                    st.session_state.expenses[col] = ""
-                elif col == "Source":
-                    st.session_state.expenses[col] = "Manual"
-                else:
-                    st.session_state.expenses[col] = ""
+                st.session_state.expenses[col] = ""
         st.session_state.expenses = st.session_state.expenses[COLUMNS]
-        # Force Amount to numeric
         st.session_state.expenses["Amount"] = pd.to_numeric(
             st.session_state.expenses["Amount"], errors="coerce"
         ).fillna(0.0)
@@ -74,6 +65,7 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
     description = st.text_input("Description", placeholder="e.g. Lunch, Monthly subscription...")
     remark = st.text_input("Remark", placeholder="Optional notes...")
     source = st.selectbox("Source", SOURCES, index=0)
+    agreement = st.text_input("Agreement", placeholder="Contract/Agreement reference...")
     submitted = st.form_submit_button("Add Expense", use_container_width=True)
     
     if submitted:
@@ -89,70 +81,45 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
                 "Vendor": vendor.strip() if vendor else "-",
                 "Description": description.strip() if description else "-",
                 "Remark": remark.strip() if remark else "-",
-                "Source": source
+                "Source": source,
+                "Agreement": agreement.strip() if agreement else "-"
             }
             st.session_state.expenses = pd.concat(
                 [st.session_state.expenses, pd.DataFrame([new_row])],
                 ignore_index=True
             )
             save_data()
-            st.success(f"Added: {category} - ${amount:.2f}")
+            st.success(f"Added: {category} - ${amount:,.2f}")
 
 # ======================
-# Sidebar - Import CSV
+# Sidebar - Filters (Year + Month)
 # ======================
 st.sidebar.divider()
-st.sidebar.header("📥 Import Expenses")
-uploaded_file = st.sidebar.file_uploader(
-    "Upload CSV file",
-    type=["csv"],
-    help="Preferred columns: Date, Period, User, Category, Amount, Vendor, Description, Remark, Source"
-)
+st.sidebar.header("🔍 Filters")
 
-if uploaded_file is not None:
-    try:
-        import_df = pd.read_csv(uploaded_file)
-        import_df.columns = import_df.columns.str.strip().str.title()
-        
-        min_required = {"Date", "Category", "Amount"}
-        if not min_required.issubset(set(import_df.columns)):
-            st.sidebar.error(
-                f"Missing columns. At least required: {', '.join(min_required)}\n"
-                f"Found: {', '.join(import_df.columns)}"
-            )
-        else:
-            defaults = {
-                "Period": current_period,
-                "User": USER,
-                "Vendor": "-",
-                "Description": "-",
-                "Remark": "-",
-                "Source": "Import"
-            }
-            for col, default in defaults.items():
-                if col not in import_df.columns:
-                    import_df[col] = default
-            
-            import_df = import_df[COLUMNS].copy()
-            import_df["Amount"] = pd.to_numeric(import_df["Amount"], errors="coerce")
-            import_df = import_df.dropna(subset=["Amount"])
-            import_df["Amount"] = import_df["Amount"].astype(float)
-            
-            for col in ["Date", "Period", "User", "Category", "Vendor", "Description", "Remark", "Source"]:
-                import_df[col] = import_df[col].fillna(defaults.get(col, "-")).astype(str)
-            
-            if st.sidebar.button("Import Data", use_container_width=True, type="primary"):
-                before = len(st.session_state.expenses)
-                st.session_state.expenses = pd.concat(
-                    [st.session_state.expenses, import_df],
-                    ignore_index=True
-                )
-                save_data()
-                added = len(st.session_state.expenses) - before
-                st.sidebar.success(f"Successfully imported {added} expenses!")
-                st.rerun()
-    except Exception as e:
-        st.sidebar.error(f"Error reading file: {e}")
+if not st.session_state.expenses.empty:
+    st.session_state.expenses["Date"] = pd.to_datetime(
+        st.session_state.expenses["Date"], errors="coerce"
+    )
+    st.session_state.expenses["Year"] = st.session_state.expenses["Date"].dt.year
+    st.session_state.expenses["Month"] = st.session_state.expenses["Date"].dt.month
+
+    years = sorted(st.session_state.expenses["Year"].dropna().unique())
+    selected_year = st.sidebar.selectbox("Year", options=["All"] + years)
+
+    months = sorted(st.session_state.expenses["Month"].dropna().unique())
+    month_names = {i: datetime(2000, i, 1).strftime("%B") for i in months}
+    month_options = ["All"] + [month_names[m] for m in months]
+    selected_month = st.sidebar.selectbox("Month", options=month_options)
+
+    filtered_df = st.session_state.expenses.copy()
+    if selected_year != "All":
+        filtered_df = filtered_df[filtered_df["Year"] == selected_year]
+    if selected_month != "All":
+        month_num = [k for k, v in month_names.items() if v == selected_month][0]
+        filtered_df = filtered_df[filtered_df["Month"] == month_num]
+else:
+    filtered_df = st.session_state.expenses.copy()
 
 # ======================
 # Main Area
@@ -161,13 +128,12 @@ st.title("💰 Expense Tracker")
 st.markdown(f"Welcome, **{USER}**! Record and manage your daily expenses easily.")
 
 # Summary
-if not st.session_state.expenses.empty:
-    total = st.session_state.expenses["Amount"].sum()
+if not filtered_df.empty:
+    total = filtered_df["Amount"].sum()
     st.metric("Total Spent", f"${total:,.2f}")
     
     by_category = (
-        st.session_state.expenses
-        .groupby("Category")["Amount"]
+        filtered_df.groupby("Category")["Amount"]
         .sum()
         .sort_values(ascending=False)
     )
@@ -176,7 +142,7 @@ if not st.session_state.expenses.empty:
     with col1:
         st.subheader("Spending by Category")
         st.dataframe(
-            by_category.reset_index().rename(columns={"Amount": "Total ($)"}),
+            by_category.reset_index().rename(columns={"Amount": "Total ($)"}).style.format({"Total ($)": "{:,.2f}"}),
             use_container_width=True,
             hide_index=True
         )
@@ -191,12 +157,14 @@ st.divider()
 # ======================
 # All Expenses + Deletion
 # ======================
-st.subheader("All Expenses")
+st.subheader("All Expenses (Filtered)")
 
-if not st.session_state.expenses.empty:
-    # Prepare dataframe with Select checkbox
-    display_df = st.session_state.expenses.copy()
+if not filtered_df.empty:
+    display_df = filtered_df.copy()
     display_df.insert(0, "Select", False)
+
+    # Format Amount column with thousands separator and 2 decimals
+    display_df["Amount"] = display_df["Amount"].map(lambda x: f"{x:,.2f}")
 
     edited_df = st.data_editor(
         display_df,
@@ -226,7 +194,6 @@ if not st.session_state.expenses.empty:
                 st.rerun()
 
     with col_del2:
-        # Two-step Delete All
         if "confirm_delete_all" not in st.session_state:
             st.session_state.confirm_delete_all = False
 
@@ -260,7 +227,7 @@ if not st.session_state.expenses.empty:
         )
 
 else:
-    st.write("No data to display.")
+    st.write("No data to display for the selected filters.")
 
 # Footer
 st.markdown("---")
