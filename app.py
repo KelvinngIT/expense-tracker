@@ -224,125 +224,124 @@ else:
 st.markdown("---")
 
 # ======================
-# All Expenses + Add / Edit / Delete Rows
+# All Expenses + Row Numbers + Add / Edit / Delete
 # ======================
 st.subheader("All Expenses (Filtered)")
 
-if not filtered_df.empty or True:  # always show the editor
-    # Prepare display dataframe
-    display_df = filtered_df.copy().reset_index(drop=True)
-    display_df.insert(0, "Select", False)
+# Always show the editor (even if empty)
+display_df = filtered_df.copy().reset_index(drop=True)
 
-    # Make sure columns exist and have correct types
-    for col in COLUMNS:
-        if col not in display_df.columns:
-            display_df[col] = ""
+# Add Row Number column
+display_df.insert(0, "No.", range(1, len(display_df) + 1))
+display_df.insert(1, "Select", False)
 
-    # Format Amount only for display (we will convert back later)
-    display_df["Amount"] = pd.to_numeric(display_df["Amount"], errors="coerce").fillna(0.0)
+# Ensure all required columns exist
+for col in COLUMNS:
+    if col not in display_df.columns:
+        display_df[col] = ""
 
-    edited_df = st.data_editor(
-        display_df,
-        num_rows="dynamic",                    # ← allows adding new rows
-        hide_index=True,
-        use_container_width=True,
-        key="expense_editor",
-        column_config={
-            "Select": st.column_config.CheckboxColumn("Select", default=False),
-            "Date": st.column_config.TextColumn("Date"),
-            "User": st.column_config.TextColumn("User"),
-            "Category": st.column_config.SelectboxColumn(
-                "Category", options=CATEGORIES, required=True
-            ),
-            "Amount": st.column_config.NumberColumn(
-                "Amount ($)", min_value=0.0, format="%.2f", required=True
-            ),
-            "Vendor": st.column_config.TextColumn("Vendor"),
-            "Description": st.column_config.TextColumn("Description"),
-            "Remark": st.column_config.TextColumn("Remark"),
-            "Source": st.column_config.SelectboxColumn(
-                "Source", options=SOURCES
-            ),
-        }
-    )
+display_df["Amount"] = pd.to_numeric(display_df["Amount"], errors="coerce").fillna(0.0)
 
-    # ---------- Action buttons ----------
-    col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
+edited_df = st.data_editor(
+    display_df,
+    num_rows="dynamic",
+    hide_index=True,
+    use_container_width=True,
+    key="expense_editor",
+    column_config={
+        "No.": st.column_config.NumberColumn(
+            "No.", 
+            width="small",
+            disabled=True,          # row number is read-only
+            help="Row number"
+        ),
+        "Select": st.column_config.CheckboxColumn("Select", default=False),
+        "Date": st.column_config.TextColumn("Date"),
+        "User": st.column_config.TextColumn("User"),
+        "Category": st.column_config.SelectboxColumn(
+            "Category", options=CATEGORIES, required=True
+        ),
+        "Amount": st.column_config.NumberColumn(
+            "Amount ($)", min_value=0.0, format="%.2f", required=True
+        ),
+        "Vendor": st.column_config.TextColumn("Vendor"),
+        "Description": st.column_config.TextColumn("Description"),
+        "Remark": st.column_config.TextColumn("Remark"),
+        "Source": st.column_config.SelectboxColumn(
+            "Source", options=SOURCES
+        ),
+    }
+)
 
-    with col_save:
-        if st.button("💾 Save Changes / Add Rows", type="primary", use_container_width=True):
-            # Clean the edited data
-            clean_df = edited_df.drop(columns=["Select"], errors="ignore").copy()
-            clean_df["Amount"] = pd.to_numeric(clean_df["Amount"], errors="coerce").fillna(0.0)
-            clean_df["User"] = clean_df["User"].fillna(USER)
-            clean_df["Vendor"] = clean_df["Vendor"].fillna("-")
-            clean_df["Description"] = clean_df["Description"].fillna("-")
-            clean_df["Remark"] = clean_df["Remark"].fillna("-")
-            clean_df["Source"] = clean_df["Source"].fillna("Manual")
+# ---------- Action buttons ----------
+col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
 
-            # Only keep valid rows (must have Category and Amount > 0)
-            clean_df = clean_df[
-                (clean_df["Category"].notna()) &
-                (clean_df["Category"] != "") &
-                (clean_df["Amount"] > 0)
-            ]
+with col_save:
+    if st.button("💾 Save Changes / Add Rows", type="primary", use_container_width=True):
+        clean_df = edited_df.drop(columns=["Select", "No."], errors="ignore").copy()
+        clean_df["Amount"] = pd.to_numeric(clean_df["Amount"], errors="coerce").fillna(0.0)
+        clean_df["User"] = clean_df["User"].fillna(USER)
+        clean_df["Vendor"] = clean_df["Vendor"].fillna("-")
+        clean_df["Description"] = clean_df["Description"].fillna("-")
+        clean_df["Remark"] = clean_df["Remark"].fillna("-")
+        clean_df["Source"] = clean_df["Source"].fillna("Manual")
 
-            # Because we are working on a filtered view, the safest way is to
-            # replace the whole dataset when the user saves (or only when no filter is active)
-            if selected_year == "All" and selected_month == "All":
-                st.session_state.expenses = clean_df[COLUMNS].reset_index(drop=True)
-                save_data()
-                st.success("Changes and new rows saved successfully!")
-                st.rerun()
-            else:
-                st.warning(
-                    "You currently have filters applied. "
-                    "Please set Year and Month to **All** before saving new/edited rows."
+        # Keep only valid rows
+        clean_df = clean_df[
+            (clean_df["Category"].notna()) &
+            (clean_df["Category"] != "") &
+            (clean_df["Amount"] > 0)
+        ]
+
+        if selected_year == "All" and selected_month == "All":
+            st.session_state.expenses = clean_df[COLUMNS].reset_index(drop=True)
+            save_data()
+            st.success("Changes and new rows saved successfully!")
+            st.rerun()
+        else:
+            st.warning(
+                "You currently have filters applied. "
+                "Please set Year and Month to **All** before saving new/edited rows."
+            )
+
+with col_del:
+    if st.button("🗑️ Delete Selected", use_container_width=True):
+        selected_mask = edited_df["Select"] == True
+        if not selected_mask.any():
+            st.warning("Please select at least one expense to delete.")
+        else:
+            to_delete = edited_df[selected_mask]
+            original = st.session_state.expenses.copy()
+
+            for _, row in to_delete.iterrows():
+                mask = (
+                    (original["Date"].astype(str) == str(row["Date"])) &
+                    (original["Category"] == row["Category"]) &
+                    (original["Amount"] == float(row["Amount"])) &
+                    (original["Vendor"] == row["Vendor"])
                 )
+                original = original[~mask]
 
-    with col_del:
-        if st.button("🗑️ Delete Selected", use_container_width=True):
-            selected_mask = edited_df["Select"] == True
-            if not selected_mask.any():
-                st.warning("Please select at least one expense to delete.")
-            else:
-                # Because of filtering, we delete by matching key columns
-                to_delete = edited_df[selected_mask]
-                original = st.session_state.expenses.copy()
+            st.session_state.expenses = original.reset_index(drop=True)
+            save_data()
+            st.success(f"Deleted {selected_mask.sum()} expense(s).")
+            st.rerun()
 
-                # Simple approach: drop matching rows
-                for _, row in to_delete.iterrows():
-                    mask = (
-                        (original["Date"].astype(str) == str(row["Date"])) &
-                        (original["Category"] == row["Category"]) &
-                        (original["Amount"] == float(row["Amount"])) &
-                        (original["Vendor"] == row["Vendor"])
-                    )
-                    original = original[~mask]
+with col_del_all:
+    if st.button("💥 Delete All", use_container_width=True):
+        st.session_state.confirm_delete_all = True
 
-                st.session_state.expenses = original.reset_index(drop=True)
-                save_data()
-                st.success(f"Deleted {selected_mask.sum()} expense(s).")
-                st.rerun()
-
-    with col_del_all:
-        if st.button("💥 Delete All", use_container_width=True):
-            st.session_state.confirm_delete_all = True
-
-    if st.session_state.get("confirm_delete_all", False):
-        st.warning("⚠️ Are you sure you want to delete **ALL** expenses? This cannot be undone.")
-        c1, c2, _ = st.columns([1, 1, 3])
-        with c1:
-            if st.button("✅ Yes, Delete Everything", type="primary"):
-                st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
-                save_data()
-                st.session_state.confirm_delete_all = False
-                st.success("All expenses have been deleted.")
-                st.rerun()
-        with c2:
-            if st.button("❌ Cancel"):
-                st.session_state.confirm_delete_all = False
-                st.rerun()
-
-else:
-    st.info("No expenses to display. You can still add new ones using the form on the left.")
+if st.session_state.get("confirm_delete_all", False):
+    st.warning("⚠️ Are you sure you want to delete **ALL** expenses? This cannot be undone.")
+    c1, c2, _ = st.columns([1, 1, 3])
+    with c1:
+        if st.button("✅ Yes, Delete Everything", type="primary"):
+            st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
+            save_data()
+            st.session_state.confirm_delete_all = False
+            st.success("All expenses have been deleted.")
+            st.rerun()
+    with c2:
+        if st.button("❌ Cancel"):
+            st.session_state.confirm_delete_all = False
+            st.rerun()
