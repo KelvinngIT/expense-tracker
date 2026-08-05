@@ -7,7 +7,7 @@ import os
 st.set_page_config(
     page_title="Expense Tracker",
     page_icon="💰",
-    layout="wide"
+    layout="wide"A
 )
 
 # ======================
@@ -23,7 +23,7 @@ USER_FILE = os.path.join(DATA_DIR, f"{USER}_expenses.csv")
 # ======================
 COLUMNS = [
     "Date", "Period", "User", "Category", "Amount",
-    "Vendor", "Description", "Remark", "agreement","Source"
+    "Vendor", "Description", "Remark", "Agreement","Source"
 ]
 
 if "expenses" not in st.session_state:
