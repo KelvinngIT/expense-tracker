@@ -29,19 +29,10 @@ COLUMNS = [
 if "expenses" not in st.session_state:
     if os.path.exists(USER_FILE):
         st.session_state.expenses = pd.read_csv(USER_FILE)
-        # Ensure all required columns exist (for older files)
         for col in COLUMNS:
             if col not in st.session_state.expenses.columns:
-                if col == "User":
-                    st.session_state.expenses[col] = USER
-                elif col == "Period":
-                    st.session_state.expenses[col] = ""
-                elif col == "Source":
-                    st.session_state.expenses[col] = "Manual"
-                else:
-                    st.session_state.expenses[col] = ""
+                st.session_state.expenses[col] = ""
         st.session_state.expenses = st.session_state.expenses[COLUMNS]
-        # Force Amount to numeric
         st.session_state.expenses["Amount"] = pd.to_numeric(
             st.session_state.expenses["Amount"], errors="coerce"
         ).fillna(0.0)
@@ -155,19 +146,44 @@ if uploaded_file is not None:
         st.sidebar.error(f"Error reading file: {e}")
 
 # ======================
+# Sidebar - Filters (Period + Year)
+# ======================
+st.sidebar.divider()
+st.sidebar.header("🔍 Filters")
+
+if not st.session_state.expenses.empty:
+    st.session_state.expenses["Date"] = pd.to_datetime(
+        st.session_state.expenses["Date"], errors="coerce"
+    )
+    st.session_state.expenses["Year"] = st.session_state.expenses["Date"].dt.year
+
+    years = sorted(st.session_state.expenses["Year"].dropna().unique())
+    selected_year = st.sidebar.selectbox("Year", options=["All"] + years)
+
+    periods = sorted(st.session_state.expenses["Period"].dropna().unique())
+    selected_period = st.sidebar.selectbox("Period", options=["All"] + periods)
+
+    filtered_df = st.session_state.expenses.copy()
+    if selected_year != "All":
+        filtered_df = filtered_df[filtered_df["Year"] == selected_year]
+    if selected_period != "All":
+        filtered_df = filtered_df[filtered_df["Period"] == selected_period]
+else:
+    filtered_df = st.session_state.expenses.copy()
+
+# ======================
 # Main Area
 # ======================
 st.title("💰 Expense Tracker")
 st.markdown(f"Welcome, **{USER}**! Record and manage your daily expenses easily.")
 
 # Summary
-if not st.session_state.expenses.empty:
-    total = st.session_state.expenses["Amount"].sum()
+if not filtered_df.empty:
+    total = filtered_df["Amount"].sum()
     st.metric("Total Spent", f"${total:,.2f}")
     
     by_category = (
-        st.session_state.expenses
-        .groupby("Category")["Amount"]
+        filtered_df.groupby("Category")["Amount"]
         .sum()
         .sort_values(ascending=False)
     )
@@ -191,11 +207,10 @@ st.divider()
 # ======================
 # All Expenses + Deletion
 # ======================
-st.subheader("All Expenses")
+st.subheader("All Expenses (Filtered)")
 
-if not st.session_state.expenses.empty:
-    # Prepare dataframe with Select checkbox
-    display_df = st.session_state.expenses.copy()
+if not filtered_df.empty:
+    display_df = filtered_df.copy()
     display_df.insert(0, "Select", False)
 
     edited_df = st.data_editor(
@@ -226,7 +241,6 @@ if not st.session_state.expenses.empty:
                 st.rerun()
 
     with col_del2:
-        # Two-step Delete All
         if "confirm_delete_all" not in st.session_state:
             st.session_state.confirm_delete_all = False
 
@@ -235,33 +249,4 @@ if not st.session_state.expenses.empty:
                 st.session_state.confirm_delete_all = True
                 st.rerun()
         else:
-            st.warning("⚠️ Are you sure you want to delete ALL expenses?")
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("✅ Yes, Delete All", type="primary", use_container_width=True):
-                    st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
-                    save_data()
-                    st.session_state.confirm_delete_all = False
-                    st.success("All expenses have been deleted.")
-                    st.rerun()
-            with c2:
-                if st.button("❌ Cancel", use_container_width=True):
-                    st.session_state.confirm_delete_all = False
-                    st.rerun()
-
-    with col_del3:
-        csv = st.session_state.expenses.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="⬇️ Download CSV",
-            data=csv,
-            file_name=f"{USER}_expenses_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-
-else:
-    st.write("No data to display.")
-
-# Footer
-st.markdown("---")
-st.caption("Free to use and share")
+            st.warning("⚠️ Are you sure you want to
