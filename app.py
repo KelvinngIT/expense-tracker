@@ -4,6 +4,8 @@ from datetime import datetime
 import os
 import calendar
 import re
+import random
+import string
 
 # Page config
 st.set_page_config(
@@ -13,7 +15,7 @@ st.set_page_config(
 )
 
 # ======================
-# Helper: Clean Amount
+# Helper Functions
 # ======================
 def clean_amount(series):
     if series is None or len(series) == 0:
@@ -28,49 +30,104 @@ def is_valid_email(email: str) -> bool:
     return bool(re.match(pattern, email.strip()))
 
 def sanitize_email(email: str) -> str:
-    """Turn email into a safe filename"""
     return re.sub(r"[^a-zA-Z0-9]", "_", email.lower().strip())
 
-# ======================
-# Login Section
-# ======================
-st.sidebar.header("🔐 Login")
+def generate_verification_code(length=6):
+    return "".join(random.choices(string.digits, k=length))
 
+# ======================
+# Session State Init
+# ======================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+if "user_email" not in st.session_state:
     st.session_state.user_email = None
+if "verification_code" not in st.session_state:
+    st.session_state.verification_code = None
+if "pending_email" not in st.session_state:
+    st.session_state.pending_email = None
+if "code_sent" not in st.session_state:
+    st.session_state.code_sent = False
+
+# ======================
+# Login + Verification UI
+# ======================
+st.sidebar.header("🔐 Login with Email")
 
 if not st.session_state.logged_in:
-    with st.sidebar.form("login_form"):
-        email = st.text_input("Email address", placeholder="you@example.com")
-        login_btn = st.form_submit_button("Login", use_container_width=True, type="primary")
 
-        if login_btn:
-            email = email.strip().lower()
-            if not email:
-                st.error("Please enter your email.")
-            elif not is_valid_email(email):
-                st.error("Please enter a valid email address.")
-            else:
-                st.session_state.logged_in = True
-                st.session_state.user_email = email
+    # Step 1: Enter Email
+    if not st.session_state.code_sent:
+        with st.sidebar.form("email_form"):
+            email = st.text_input("Email address", placeholder="you@example.com")
+            send_btn = st.form_submit_button("Send Verification Code", use_container_width=True, type="primary")
+
+            if send_btn:
+                email = email.strip().lower()
+                if not email:
+                    st.error("Please enter your email.")
+                elif not is_valid_email(email):
+                    st.error("Please enter a valid email address.")
+                else:
+                    # Generate code
+                    code = generate_verification_code()
+                    st.session_state.verification_code = code
+                    st.session_state.pending_email = email
+                    st.session_state.code_sent = True
+                    st.rerun()
+
+    # Step 2: Enter Verification Code
+    else:
+        st.sidebar.info(f"Code sent to:\n**{st.session_state.pending_email}**")
+
+        # For testing – show the code (remove this in production)
+        st.sidebar.warning(f"🧪 Demo Code: **{st.session_state.verification_code}**")
+        st.sidebar.caption("In a real app this code would be sent by email.")
+
+        with st.sidebar.form("verify_form"):
+            user_code = st.text_input("Enter 6-digit verification code", max_chars=6)
+            col1, col2 = st.columns(2)
+            with col1:
+                verify_btn = st.form_submit_button("Verify & Login", use_container_width=True, type="primary")
+            with col2:
+                back_btn = st.form_submit_button("← Back", use_container_width=True)
+
+            if back_btn:
+                st.session_state.code_sent = False
+                st.session_state.verification_code = None
+                st.session_state.pending_email = None
                 st.rerun()
+
+            if verify_btn:
+                if user_code.strip() == st.session_state.verification_code:
+                    st.session_state.logged_in = True
+                    st.session_state.user_email = st.session_state.pending_email
+                    # Clear verification data
+                    st.session_state.code_sent = False
+                    st.session_state.verification_code = None
+                    st.session_state.pending_email = None
+                    st.success("Login successful!")
+                    st.rerun()
+                else:
+                    st.error("Incorrect verification code. Please try again.")
+
 else:
+    # Already logged in
     st.sidebar.success(f"Logged in as:\n**{st.session_state.user_email}**")
     if st.sidebar.button("Logout", use_container_width=True):
         st.session_state.logged_in = False
         st.session_state.user_email = None
-        st.session_state.pop("expenses", None)  # clear data on logout
+        st.session_state.pop("expenses", None)
         st.rerun()
 
-# Stop the app if not logged in
+# Stop the rest of the app if not logged in
 if not st.session_state.logged_in:
     st.title("💰 Expense Tracker")
     st.info("👈 Please login with your email in the sidebar to continue.")
     st.stop()
 
 # ======================
-# User Data Setup (after login)
+# User Data Setup (after successful login)
 # ======================
 USER = st.session_state.user_email
 safe_user = sanitize_email(USER)
