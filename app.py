@@ -34,7 +34,8 @@ def save_data():
 
 CATEGORIES = [
     "Food & Dining", "Transportation", "Shopping", "Bills & Utilities",
-    "Entertainment", "Health", "Education", "Travel", "Other"
+    "Entertainment", "Health", "Education", "Travel",
+    "Type", "Family Support", "Assets", "Other"
 ]
 
 # ======================
@@ -46,9 +47,8 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
     category = st.selectbox("Category", CATEGORIES)
     amount = st.number_input("Amount ($)", min_value=0.0, step=0.01, format="%.2f")
     description = st.text_input("Description", placeholder="e.g. Lunch, Uber...")
-
     submitted = st.form_submit_button("Add Expense", use_container_width=True)
-
+    
     if submitted:
         if amount <= 0:
             st.error("Please enter a valid amount (> 0)")
@@ -71,7 +71,6 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
 # ======================
 st.sidebar.divider()
 st.sidebar.header("📥 Import Expenses")
-
 uploaded_file = st.sidebar.file_uploader(
     "Upload CSV file",
     type=["csv"],
@@ -81,10 +80,9 @@ uploaded_file = st.sidebar.file_uploader(
 if uploaded_file is not None:
     try:
         import_df = pd.read_csv(uploaded_file)
-
         # Normalize column names (case-insensitive + strip spaces)
         import_df.columns = import_df.columns.str.strip().str.title()
-
+        
         required_cols = {"Date", "Category", "Amount", "Description"}
         if not required_cols.issubset(set(import_df.columns)):
             st.sidebar.error(
@@ -99,7 +97,7 @@ if uploaded_file is not None:
             import_df["Amount"] = import_df["Amount"].astype(float)
             import_df["Description"] = import_df["Description"].fillna("-").astype(str)
             import_df["Date"] = import_df["Date"].astype(str)
-
+            
             if st.sidebar.button("Import Data", use_container_width=True, type="primary"):
                 before = len(st.session_state.expenses)
                 st.session_state.expenses = pd.concat(
@@ -110,7 +108,6 @@ if uploaded_file is not None:
                 added = len(st.session_state.expenses) - before
                 st.sidebar.success(f"Successfully imported {added} expenses!")
                 st.rerun()
-
     except Exception as e:
         st.sidebar.error(f"Error reading file: {e}")
 
@@ -124,14 +121,14 @@ st.markdown(f"Welcome, **{USER}**! Record and manage your daily expenses easily.
 if not st.session_state.expenses.empty:
     total = st.session_state.expenses["Amount"].sum()
     st.metric("Total Spent", f"${total:.2f}")
-
+    
     by_category = (
         st.session_state.expenses
         .groupby("Category")["Amount"]
         .sum()
         .sort_values(ascending=False)
     )
-
+    
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Spending by Category")
@@ -154,7 +151,7 @@ if not st.session_state.expenses.empty:
     display_df = st.session_state.expenses.copy()
     display_df.index.name = "Index"
     st.dataframe(display_df, use_container_width=True)
-
+    
     # Delete section
     st.markdown("### Delete Expense")
     col_a, col_b = st.columns([1, 3])
@@ -176,7 +173,7 @@ if not st.session_state.expenses.empty:
             save_data()
             st.success(f"Deleted: {removed['Category']} - ${removed['Amount']:.2f}")
             st.rerun()
-
+    
     # Clear all + Download
     col_c, col_d = st.columns(2)
     with col_c:
@@ -187,7 +184,6 @@ if not st.session_state.expenses.empty:
             save_data()
             st.success("All expenses cleared!")
             st.rerun()
-
     with col_d:
         csv = st.session_state.expenses.to_csv(index=False).encode("utf-8")
         st.download_button(
