@@ -21,7 +21,7 @@ USER_FILE = os.path.join(DATA_DIR, f"{USER}_expenses.csv")
 # ======================
 # Load or Initialize Data
 # ======================
-COLUMNS = ["Date", "Period", "User", "Category", "Amount", "Description"]
+COLUMNS = ["Date", "Period", "User", "Category", "Amount", "Vendor", "Description", "Remark"]
 
 if "expenses" not in st.session_state:
     if os.path.exists(USER_FILE):
@@ -60,7 +60,9 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
     period = st.text_input("Period", value=current_period, help="e.g. 2026-08 or Q3-2026")
     category = st.selectbox("Category", CATEGORIES)
     amount = st.number_input("Amount ($)", min_value=0.0, step=0.01, format="%.2f")
-    description = st.text_input("Description", placeholder="e.g. Lunch, Uber...")
+    vendor = st.text_input("Vendor", placeholder="e.g. Starbucks, Uber, Amazon...")
+    description = st.text_input("Description", placeholder="e.g. Lunch, Monthly subscription...")
+    remark = st.text_input("Remark", placeholder="Optional notes...")
     submitted = st.form_submit_button("Add Expense", use_container_width=True)
     
     if submitted:
@@ -73,7 +75,9 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
                 "User": USER,
                 "Category": category,
                 "Amount": float(amount),
-                "Description": description.strip() if description else "-"
+                "Vendor": vendor.strip() if vendor else "-",
+                "Description": description.strip() if description else "-",
+                "Remark": remark.strip() if remark else "-"
             }
             st.session_state.expenses = pd.concat(
                 [st.session_state.expenses, pd.DataFrame([new_row])],
@@ -90,7 +94,7 @@ st.sidebar.header("📥 Import Expenses")
 uploaded_file = st.sidebar.file_uploader(
     "Upload CSV file",
     type=["csv"],
-    help="Preferred columns: Date, Period, User, Category, Amount, Description"
+    help="Preferred columns: Date, Period, User, Category, Amount, Vendor, Description, Remark"
 )
 
 if uploaded_file is not None:
@@ -100,7 +104,7 @@ if uploaded_file is not None:
         import_df.columns = import_df.columns.str.strip().str.title()
         
         # Required minimum columns
-        min_required = {"Date", "Category", "Amount", "Description"}
+        min_required = {"Date", "Category", "Amount"}
         if not min_required.issubset(set(import_df.columns)):
             st.sidebar.error(
                 f"Missing columns. At least required: {', '.join(min_required)}\n"
@@ -108,20 +112,25 @@ if uploaded_file is not None:
             )
         else:
             # Add missing optional columns with defaults
-            if "Period" not in import_df.columns:
-                import_df["Period"] = current_period
-            if "User" not in import_df.columns:
-                import_df["User"] = USER
+            defaults = {
+                "Period": current_period,
+                "User": USER,
+                "Vendor": "-",
+                "Description": "-",
+                "Remark": "-"
+            }
+            for col, default in defaults.items():
+                if col not in import_df.columns:
+                    import_df[col] = default
             
             # Keep only the standard columns and clean
             import_df = import_df[COLUMNS].copy()
             import_df["Amount"] = pd.to_numeric(import_df["Amount"], errors="coerce")
             import_df = import_df.dropna(subset=["Amount"])
             import_df["Amount"] = import_df["Amount"].astype(float)
-            import_df["Description"] = import_df["Description"].fillna("-").astype(str)
-            import_df["Date"] = import_df["Date"].astype(str)
-            import_df["Period"] = import_df["Period"].fillna(current_period).astype(str)
-            import_df["User"] = import_df["User"].fillna(USER).astype(str)
+            
+            for col in ["Date", "Period", "User", "Category", "Vendor", "Description", "Remark"]:
+                import_df[col] = import_df[col].fillna(defaults.get(col, "-")).astype(str)
             
             if st.sidebar.button("Import Data", use_container_width=True, type="primary"):
                 before = len(st.session_state.expenses)
@@ -177,3 +186,32 @@ if not st.session_state.expenses.empty:
     display_df.index.name = "Index"
     st.dataframe(display_df, use_container_width=True)
     
+    # Delete section
+    st.markdown("### Delete Expense")
+    col_a, col_b = st.columns([1, 3])
+    with col_a:
+        delete_idx = st.number_input(
+            "Index to delete",
+            min_value=0,
+            max_value=len(st.session_state.expenses) - 1,
+            step=1
+        )
+    with col_b:
+        if st.button("🗑️ Delete Selected", type="secondary"):
+            removed = st.session_state.expenses.iloc[int(delete_idx)]
+            st.session_state.expenses = (
+                st.session_state.expenses
+                .drop(int(delete_idx))
+                .reset_index(drop=True)
+            )
+            save_data()
+            st.success(f"Deleted: {removed['Category']} - ${removed['Amount']:.2f}")
+            st.rerun()
+    
+    # Clear all + Download
+    col_c, col_d = st.columns(2)
+    with col_c:
+        if st.button("🧹 Clear All Expenses", type="primary"):
+            st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
+            save_data()
+            st
