@@ -21,7 +21,10 @@ USER_FILE = os.path.join(DATA_DIR, f"{USER}_expenses.csv")
 # ======================
 # Load or Initialize Data
 # ======================
-COLUMNS = ["Date", "Period", "User", "Category", "Amount", "Vendor", "Description", "Remark"]
+COLUMNS = [
+    "Date", "Period", "User", "Category", "Amount",
+    "Vendor", "Description", "Remark", "Source"
+]
 
 if "expenses" not in st.session_state:
     if os.path.exists(USER_FILE):
@@ -33,6 +36,8 @@ if "expenses" not in st.session_state:
                     st.session_state.expenses[col] = USER
                 elif col == "Period":
                     st.session_state.expenses[col] = ""
+                elif col == "Source":
+                    st.session_state.expenses[col] = "Manual"
                 else:
                     st.session_state.expenses[col] = ""
         st.session_state.expenses = st.session_state.expenses[COLUMNS]
@@ -47,6 +52,8 @@ CATEGORIES = [
     "Entertainment", "Health", "Education", "Travel",
     "Type", "Family Support", "Assets", "Other"
 ]
+
+SOURCES = ["Manual", "Bank", "Credit Card", "Cash", "Import", "Other"]
 
 # Helper: current period (YYYY-MM)
 current_period = datetime.now().strftime("%Y-%m")
@@ -63,6 +70,7 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
     vendor = st.text_input("Vendor", placeholder="e.g. Starbucks, Uber, Amazon...")
     description = st.text_input("Description", placeholder="e.g. Lunch, Monthly subscription...")
     remark = st.text_input("Remark", placeholder="Optional notes...")
+    source = st.selectbox("Source", SOURCES, index=0)
     submitted = st.form_submit_button("Add Expense", use_container_width=True)
     
     if submitted:
@@ -77,7 +85,8 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
                 "Amount": float(amount),
                 "Vendor": vendor.strip() if vendor else "-",
                 "Description": description.strip() if description else "-",
-                "Remark": remark.strip() if remark else "-"
+                "Remark": remark.strip() if remark else "-",
+                "Source": source
             }
             st.session_state.expenses = pd.concat(
                 [st.session_state.expenses, pd.DataFrame([new_row])],
@@ -94,7 +103,7 @@ st.sidebar.header("📥 Import Expenses")
 uploaded_file = st.sidebar.file_uploader(
     "Upload CSV file",
     type=["csv"],
-    help="Preferred columns: Date, Period, User, Category, Amount, Vendor, Description, Remark"
+    help="Preferred columns: Date, Period, User, Category, Amount, Vendor, Description, Remark, Source"
 )
 
 if uploaded_file is not None:
@@ -117,7 +126,8 @@ if uploaded_file is not None:
                 "User": USER,
                 "Vendor": "-",
                 "Description": "-",
-                "Remark": "-"
+                "Remark": "-",
+                "Source": "Import"
             }
             for col, default in defaults.items():
                 if col not in import_df.columns:
@@ -129,7 +139,7 @@ if uploaded_file is not None:
             import_df = import_df.dropna(subset=["Amount"])
             import_df["Amount"] = import_df["Amount"].astype(float)
             
-            for col in ["Date", "Period", "User", "Category", "Vendor", "Description", "Remark"]:
+            for col in ["Date", "Period", "User", "Category", "Vendor", "Description", "Remark", "Source"]:
                 import_df[col] = import_df[col].fillna(defaults.get(col, "-")).astype(str)
             
             if st.sidebar.button("Import Data", use_container_width=True, type="primary"):
@@ -214,4 +224,20 @@ if not st.session_state.expenses.empty:
         if st.button("🧹 Clear All Expenses", type="primary"):
             st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
             save_data()
-            st
+            st.success("All expenses cleared!")
+            st.rerun()
+    with col_d:
+        csv = st.session_state.expenses.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="⬇️ Download CSV",
+            data=csv,
+            file_name=f"{USER}_expenses_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+else:
+    st.write("No data to display.")
+
+# Footer
+st.markdown("---")
+st.caption("Free to use and share")
