@@ -45,7 +45,7 @@ def save_data():
 CATEGORIES = [
     "Food & Dining", "Transportation", "Shopping", "Bills & Utilities",
     "Entertainment", "Health", "Education", "Travel",
-    "Type", "Family Support", "Assets", "Other"
+    "Family Support", "Assets", "Other"
 ]
 
 SOURCES = ["Manual", "Bank", "Credit Card", "Cash", "Import", "Other"]
