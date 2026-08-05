@@ -13,14 +13,6 @@ st.set_page_config(
 )
 
 # ======================
-# User Identification
-# ======================
-USER = st.sidebar.text_input("Enter your username", value="guest")
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
-USER_FILE = os.path.join(DATA_DIR, f"{USER}_expenses.csv")
-
-# ======================
 # Helper: Clean Amount
 # ======================
 def clean_amount(series):
@@ -31,9 +23,62 @@ def clean_amount(series):
     s = s.str.replace(r"[^0-9.\-]", "", regex=True)
     return pd.to_numeric(s, errors="coerce").fillna(0.0)
 
+def is_valid_email(email: str) -> bool:
+    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+    return bool(re.match(pattern, email.strip()))
+
+def sanitize_email(email: str) -> str:
+    """Turn email into a safe filename"""
+    return re.sub(r"[^a-zA-Z0-9]", "_", email.lower().strip())
+
 # ======================
-# Load or Initialize Data
+# Login Section
 # ======================
+st.sidebar.header("🔐 Login")
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.user_email = None
+
+if not st.session_state.logged_in:
+    with st.sidebar.form("login_form"):
+        email = st.text_input("Email address", placeholder="you@example.com")
+        login_btn = st.form_submit_button("Login", use_container_width=True, type="primary")
+
+        if login_btn:
+            email = email.strip().lower()
+            if not email:
+                st.error("Please enter your email.")
+            elif not is_valid_email(email):
+                st.error("Please enter a valid email address.")
+            else:
+                st.session_state.logged_in = True
+                st.session_state.user_email = email
+                st.rerun()
+else:
+    st.sidebar.success(f"Logged in as:\n**{st.session_state.user_email}**")
+    if st.sidebar.button("Logout", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.user_email = None
+        st.session_state.pop("expenses", None)  # clear data on logout
+        st.rerun()
+
+# Stop the app if not logged in
+if not st.session_state.logged_in:
+    st.title("💰 Expense Tracker")
+    st.info("👈 Please login with your email in the sidebar to continue.")
+    st.stop()
+
+# ======================
+# User Data Setup (after login)
+# ======================
+USER = st.session_state.user_email
+safe_user = sanitize_email(USER)
+
+DATA_DIR = "data"
+os.makedirs(DATA_DIR, exist_ok=True)
+USER_FILE = os.path.join(DATA_DIR, f"{safe_user}_expenses.csv")
+
 COLUMNS = [
     "Date", "User", "Category", "Amount",
     "Vendor", "Description", "Remark", "Source"
@@ -65,6 +110,7 @@ SOURCES = ["Manual", "Bank", "Credit Card", "Cash", "Import", "Other"]
 # ======================
 # Sidebar - Add Expense
 # ======================
+st.sidebar.markdown("---")
 st.sidebar.header("➕ Add New Expense")
 
 with st.sidebar.form("expense_form", clear_on_submit=True):
@@ -197,7 +243,7 @@ else:
 # Main Area
 # ======================
 st.title("💰 Expense Tracker")
-st.markdown(f"Welcome, **{USER}**! Record and manage your daily expenses easily.")
+st.markdown(f"Welcome, **{USER}**!")
 
 # Summary Metrics
 if not filtered_df.empty:
@@ -230,27 +276,22 @@ else:
 st.markdown("---")
 
 # ======================
-# Monthly Expense Charts (NEW)
+# Monthly Expense Charts
 # ======================
 st.subheader("📅 Monthly Expense Charts")
 
 if not st.session_state.expenses.empty:
-    # Prepare data for monthly charts (use full data or filtered by year)
     chart_df = st.session_state.expenses.copy()
     chart_df["Amount"] = clean_amount(chart_df["Amount"])
     chart_df["Date"] = pd.to_datetime(chart_df["Date"], errors="coerce")
     chart_df = chart_df.dropna(subset=["Date"])
 
-    # Apply Year filter for charts if selected
     if selected_year != "All":
         chart_df = chart_df[chart_df["Date"].dt.year == int(selected_year)]
 
     if not chart_df.empty:
-        # Create Year-Month period
         chart_df["YearMonth"] = chart_df["Date"].dt.to_period("M").astype(str)
-        chart_df["MonthName"] = chart_df["Date"].dt.strftime("%b %Y")
 
-        # 1. Total Monthly Spending
         monthly_total = (
             chart_df.groupby("YearMonth")["Amount"]
             .sum()
@@ -260,15 +301,12 @@ if not st.session_state.expenses.empty:
         st.markdown("### Total Spending by Month")
         st.bar_chart(monthly_total, use_container_width=True)
 
-        # Show numbers under the chart
         monthly_table = monthly_total.reset_index()
         monthly_table.columns = ["Month", "Total ($)"]
         monthly_table["Total ($)"] = monthly_table["Total ($)"].map(lambda x: f"${x:,.2f}")
         st.dataframe(monthly_table, use_container_width=True, hide_index=True)
 
         st.markdown("---")
-
-        # 2. Monthly Spending by Category
         st.markdown("### Monthly Spending by Category")
 
         monthly_cat = (
@@ -280,8 +318,6 @@ if not st.session_state.expenses.empty:
 
         if not monthly_cat.empty:
             st.bar_chart(monthly_cat, use_container_width=True)
-
-            # Optional: show the data table
             with st.expander("View Monthly Category Breakdown"):
                 st.dataframe(
                     monthly_cat.style.format("{:,.2f}"),
@@ -324,89 +360,3 @@ edited_df = st.data_editor(
     key="expense_editor",
     column_config={
         "No.": st.column_config.NumberColumn("No.", width="small", disabled=True),
-        "Select": st.column_config.CheckboxColumn("Select", default=False),
-        "Date": st.column_config.TextColumn("Date"),
-        "User": st.column_config.TextColumn("User"),
-        "Category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True),
-        "Amount": st.column_config.NumberColumn(
-            "Amount ($)",
-            min_value=0.0,
-            format="%,.2f",
-            required=True
-        ),
-        "Vendor": st.column_config.TextColumn("Vendor"),
-        "Description": st.column_config.TextColumn("Description"),
-        "Remark": st.column_config.TextColumn("Remark"),
-        "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
-    }
-)
-
-# ---------- Buttons ----------
-col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
-
-with col_save:
-    if st.button("💾 Save Changes / Add Rows", type="primary", use_container_width=True):
-        clean_df = edited_df.drop(columns=["Select", "No."], errors="ignore").copy()
-        clean_df["Amount"] = clean_amount(clean_df["Amount"])
-        clean_df["User"] = clean_df["User"].fillna(USER).astype(str)
-        clean_df["Vendor"] = clean_df["Vendor"].fillna("-").astype(str)
-        clean_df["Description"] = clean_df["Description"].fillna("-").astype(str)
-        clean_df["Remark"] = clean_df["Remark"].fillna("-").astype(str)
-        clean_df["Source"] = clean_df["Source"].fillna("Manual").astype(str)
-        clean_df["Category"] = clean_df["Category"].fillna("").astype(str)
-        clean_df["Date"] = clean_df["Date"].fillna("").astype(str)
-
-        clean_df = clean_df[
-            (clean_df["Category"].str.strip() != "") &
-            (clean_df["Amount"] > 0)
-        ]
-
-        if selected_year == "All" and selected_month == "All":
-            st.session_state.expenses = clean_df[COLUMNS].reset_index(drop=True)
-            save_data()
-            st.success("Changes and new rows saved successfully!")
-            st.rerun()
-        else:
-            st.warning("Please set Year & Month to **All** before saving.")
-
-with col_del:
-    if st.button("🗑️ Delete Selected", use_container_width=True):
-        selected_mask = edited_df["Select"] == True
-        if not selected_mask.any():
-            st.warning("Please select at least one row.")
-        else:
-            to_delete = edited_df[selected_mask]
-            original = st.session_state.expenses.copy()
-
-            for _, row in to_delete.iterrows():
-                mask = (
-                    (original["Date"].astype(str).str[:10] == str(row["Date"])[:10]) &
-                    (original["Category"] == row["Category"]) &
-                    (original["Amount"] == float(row["Amount"])) &
-                    (original["Vendor"].astype(str) == str(row["Vendor"]))
-                )
-                original = original[~mask]
-
-            st.session_state.expenses = original.reset_index(drop=True)
-            save_data()
-            st.success(f"Deleted {selected_mask.sum()} expense(s).")
-            st.rerun()
-
-with col_del_all:
-    if st.button("💥 Delete All", use_container_width=True):
-        st.session_state.confirm_delete_all = True
-
-if st.session_state.get("confirm_delete_all", False):
-    st.warning("⚠️ Are you sure you want to delete **ALL** expenses?")
-    c1, c2, _ = st.columns([1, 1, 3])
-    with c1:
-        if st.button("✅ Yes, Delete Everything", type="primary"):
-            st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
-            save_data()
-            st.session_state.confirm_delete_all = False
-            st.success("All expenses deleted.")
-            st.rerun()
-    with c2:
-        if st.button("❌ Cancel"):
-            st.session_state.confirm_delete_all = False
-            st.rerun()
