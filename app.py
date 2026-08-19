@@ -311,7 +311,7 @@ if uploaded_file is not None:
         st.sidebar.error(f"Error reading file: {e}")
 
 # ======================
-# Sidebar - Upload Income  ← NEW
+# Sidebar - Upload Income
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("📥 Upload Income")
@@ -344,7 +344,6 @@ if uploaded_income is not None:
             for col, default in defaults.items():
                 if col not in import_inc.columns:
                     import_inc[col] = default
-            # Keep only columns that exist in INCOME_COLUMNS
             import_inc = import_inc[[c for c in INCOME_COLUMNS if c in import_inc.columns]].copy()
             import_inc["Amount"] = clean_amount(import_inc["Amount"])
             import_inc = import_inc[import_inc["Amount"] > 0]
@@ -450,6 +449,106 @@ with col_m2:
     st.metric("Total Income", f"${total_income:,.2f}")
 with col_m3:
     st.metric("Net Balance", f"${net:,.2f}", delta="Surplus" if net >= 0 else "Deficit")
+
+st.markdown("---")
+
+# ======================
+# 📊 CUSTOM CHART BUILDER  ← NEW
+# ======================
+st.subheader("📊 Build Your Own Chart")
+
+with st.expander("Create Custom Chart", expanded=False):
+    c1, c2, c3, c4 = st.columns(4)
+
+    with c1:
+        chart_source = st.selectbox(
+            "Data Source",
+            options=["Expenses", "Income", "Both"],
+            key="custom_source"
+        )
+    with c2:
+        chart_type = st.selectbox(
+            "Chart Type",
+            options=["Bar", "Line", "Area"],
+            key="custom_type"
+        )
+    with c3:
+        group_by = st.selectbox(
+            "Group By",
+            options=["Category", "Month", "Source", "Vendor / Customer"],
+            key="custom_group"
+        )
+    with c4:
+        agg_method = st.selectbox(
+            "Aggregation",
+            options=["Sum", "Count", "Average"],
+            key="custom_agg"
+        )
+
+    generate_btn = st.button("🚀 Generate Chart", type="primary", use_container_width=True)
+
+    if generate_btn:
+        # Prepare data based on source
+        dfs = []
+        if chart_source in ["Expenses", "Both"] and not filtered_expenses.empty:
+            exp = filtered_expenses.copy()
+            exp["Type"] = "Expense"
+            exp = exp.rename(columns={"Vendor": "Party"})
+            dfs.append(exp)
+        if chart_source in ["Income", "Both"] and not filtered_income.empty:
+            inc = filtered_income.copy()
+            inc["Type"] = "Income"
+            inc = inc.rename(columns={"Customer": "Party"})
+            dfs.append(inc)
+
+        if not dfs:
+            st.warning("No data available for the selected source and filters.")
+        else:
+            combined = pd.concat(dfs, ignore_index=True)
+            combined["Amount"] = clean_amount(combined["Amount"])
+            combined["Date"] = pd.to_datetime(combined["Date"], errors="coerce")
+            combined = combined.dropna(subset=["Date"])
+
+            # Create grouping column
+            if group_by == "Category":
+                combined["Group"] = combined["Category"].astype(str)
+            elif group_by == "Month":
+                combined["Group"] = combined["Date"].dt.to_period("M").astype(str)
+            elif group_by == "Source":
+                combined["Group"] = combined["Source"].astype(str)
+            else:  # Vendor / Customer
+                combined["Group"] = combined["Party"].astype(str)
+
+            # Aggregate
+            if agg_method == "Sum":
+                chart_data = combined.groupby("Group")["Amount"].sum().sort_values(ascending=False)
+                ylabel = "Total Amount ($)"
+            elif agg_method == "Count":
+                chart_data = combined.groupby("Group").size().sort_values(ascending=False)
+                ylabel = "Number of Records"
+            else:  # Average
+                chart_data = combined.groupby("Group")["Amount"].mean().sort_values(ascending=False)
+                ylabel = "Average Amount ($)"
+
+            if chart_data.empty:
+                st.warning("No data after grouping.")
+            else:
+                st.markdown(f"**{chart_type} Chart** — {chart_source} grouped by **{group_by}** ({agg_method})")
+                
+                if chart_type == "Bar":
+                    st.bar_chart(chart_data, use_container_width=True)
+                elif chart_type == "Line":
+                    st.line_chart(chart_data, use_container_width=True)
+                else:  # Area
+                    st.area_chart(chart_data, use_container_width=True)
+
+                # Also show the data table
+                with st.expander("View Chart Data"):
+                    table = chart_data.reset_index()
+                    table.columns = [group_by, ylabel]
+                    if agg_method != "Count":
+                        table[ylabel] = table[ylabel].map(lambda x: f"${x:,.2f}")
+                    st.dataframe(table, use_container_width=True, hide_index=True)
 
 st.markdown("---")
 
