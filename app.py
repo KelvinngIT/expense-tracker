@@ -436,6 +436,12 @@ if not filtered_income.empty:
 st.title("💰 Expense Tracker")
 st.markdown(f"Welcome, **{USER}**!")
 
+# ===== RED REMINDER =====
+st.markdown(
+    '<p style="color:red; font-weight:bold; font-size:18px;">⚠️ Do remember to download the file to save your record</p>',
+    unsafe_allow_html=True
+)
+
 # Metrics
 col_m1, col_m2, col_m3 = st.columns(3)
 
@@ -453,7 +459,7 @@ with col_m3:
 st.markdown("---")
 
 # ======================
-# 📊 CUSTOM CHART BUILDER  ← NEW
+# 📊 CUSTOM CHART BUILDER
 # ======================
 st.subheader("📊 Build Your Own Chart")
 
@@ -488,7 +494,6 @@ with st.expander("Create Custom Chart", expanded=False):
     generate_btn = st.button("🚀 Generate Chart", type="primary", use_container_width=True)
 
     if generate_btn:
-        # Prepare data based on source
         dfs = []
         if chart_source in ["Expenses", "Both"] and not filtered_expenses.empty:
             exp = filtered_expenses.copy()
@@ -509,24 +514,22 @@ with st.expander("Create Custom Chart", expanded=False):
             combined["Date"] = pd.to_datetime(combined["Date"], errors="coerce")
             combined = combined.dropna(subset=["Date"])
 
-            # Create grouping column
             if group_by == "Category":
                 combined["Group"] = combined["Category"].astype(str)
             elif group_by == "Month":
                 combined["Group"] = combined["Date"].dt.to_period("M").astype(str)
             elif group_by == "Source":
                 combined["Group"] = combined["Source"].astype(str)
-            else:  # Vendor / Customer
+            else:
                 combined["Group"] = combined["Party"].astype(str)
 
-            # Aggregate
             if agg_method == "Sum":
                 chart_data = combined.groupby("Group")["Amount"].sum().sort_values(ascending=False)
                 ylabel = "Total Amount ($)"
             elif agg_method == "Count":
                 chart_data = combined.groupby("Group").size().sort_values(ascending=False)
                 ylabel = "Number of Records"
-            else:  # Average
+            else:
                 chart_data = combined.groupby("Group")["Amount"].mean().sort_values(ascending=False)
                 ylabel = "Average Amount ($)"
 
@@ -539,10 +542,9 @@ with st.expander("Create Custom Chart", expanded=False):
                     st.bar_chart(chart_data, use_container_width=True)
                 elif chart_type == "Line":
                     st.line_chart(chart_data, use_container_width=True)
-                else:  # Area
+                else:
                     st.area_chart(chart_data, use_container_width=True)
 
-                # Also show the data table
                 with st.expander("View Chart Data"):
                     table = chart_data.reset_index()
                     table.columns = [group_by, ylabel]
