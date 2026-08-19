@@ -128,9 +128,10 @@ COLUMNS = [
     "Vendor", "Description", "Remark", "Source"
 ]
 
+# Updated: now includes Customer (same position as Vendor)
 INCOME_COLUMNS = [
     "Date", "User", "Category", "Amount",
-    "Source", "Description", "Remark"
+    "Customer", "Description", "Remark", "Source"
 ]
 
 # ---- Expenses ----
@@ -216,7 +217,7 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
             st.rerun()
 
 # ======================
-# Sidebar - Add Income
+# Sidebar - Add Income  (now matches Expense sequence + Customer)
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("💵 Add New Income")
@@ -225,10 +226,12 @@ with st.sidebar.form("income_form", clear_on_submit=True):
     inc_date = st.date_input("Date", value=datetime.now(), key="inc_date")
     inc_category = st.selectbox("Category", INCOME_CATEGORIES, key="inc_cat")
     inc_amount = st.number_input("Amount ($)", min_value=0.0, step=0.01, format="%.2f", key="inc_amt")
-    inc_source = st.selectbox("Source", SOURCES, index=0, key="inc_source")
-    inc_description = st.text_input("Description", placeholder="e.g. Monthly salary, Client payment...", key="inc_desc")
+    inc_customer = st.text_input("Customer", placeholder="e.g. Client name, Company...", key="inc_customer")
+    inc_description = st.text_input("Description", placeholder="e.g. Monthly salary, Project payment...", key="inc_desc")
     inc_remark = st.text_input("Remark", placeholder="Optional notes...", key="inc_remark")
+    inc_source = st.selectbox("Source", SOURCES, index=0, key="inc_source")
     inc_submitted = st.form_submit_button("Add Income", use_container_width=True, type="primary")
+    
     if inc_submitted:
         if inc_amount <= 0:
             st.error("Please enter a valid amount (> 0)")
@@ -238,9 +241,10 @@ with st.sidebar.form("income_form", clear_on_submit=True):
                 "User": USER,
                 "Category": inc_category,
                 "Amount": float(inc_amount),
-                "Source": inc_source,
+                "Customer": inc_customer.strip() if inc_customer else "-",
                 "Description": inc_description.strip() if inc_description else "-",
-                "Remark": inc_remark.strip() if inc_remark else "-"
+                "Remark": inc_remark.strip() if inc_remark else "-",
+                "Source": inc_source
             }
             st.session_state.income = pd.concat(
                 [st.session_state.income, pd.DataFrame([new_inc])],
@@ -307,12 +311,11 @@ if uploaded_file is not None:
         st.sidebar.error(f"Error reading file: {e}")
 
 # ======================
-# Sidebar - Filters (with Expense / Income buttons)
+# Sidebar - Filters
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("🔍 Filters")
 
-# NEW: Expense / Income / Both filter
 view_mode = st.sidebar.radio(
     "Show",
     options=["Expenses", "Income", "Both"],
@@ -321,7 +324,7 @@ view_mode = st.sidebar.radio(
     key="view_mode"
 )
 
-# Prepare Year / Month options from both datasets
+# Collect years/months from both
 all_dates = []
 if not st.session_state.expenses.empty:
     exp_dates = pd.to_datetime(st.session_state.expenses["Date"], errors="coerce")
@@ -344,7 +347,7 @@ else:
 selected_year = st.sidebar.selectbox("Year", options=["All"] + list(years) if years else ["All"])
 selected_month = st.sidebar.selectbox("Month", options=month_options)
 
-# ---- Filter Expenses ----
+# Filter Expenses
 filtered_expenses = st.session_state.expenses.copy()
 if not filtered_expenses.empty:
     filtered_expenses["Date"] = pd.to_datetime(filtered_expenses["Date"], errors="coerce")
@@ -357,7 +360,7 @@ if not filtered_expenses.empty:
         filtered_expenses = filtered_expenses[filtered_expenses["Month"] == month_num]
     filtered_expenses["Amount"] = clean_amount(filtered_expenses["Amount"])
 
-# ---- Filter Income ----
+# Filter Income
 filtered_income = st.session_state.income.copy()
 if not filtered_income.empty:
     filtered_income["Date"] = pd.to_datetime(filtered_income["Date"], errors="coerce")
@@ -376,7 +379,7 @@ if not filtered_income.empty:
 st.title("💰 Expense Tracker")
 st.markdown(f"Welcome, **{USER}**!")
 
-# Summary Metrics
+# Metrics
 col_m1, col_m2, col_m3 = st.columns(3)
 
 total_expense = filtered_expenses["Amount"].sum() if not filtered_expenses.empty else 0.0
@@ -393,10 +396,8 @@ with col_m3:
 st.markdown("---")
 
 # ======================
-# Content based on view_mode
+# EXPENSES SECTION
 # ======================
-
-# ----- EXPENSES VIEW -----
 if view_mode in ["Expenses", "Both"]:
     st.subheader("📉 Expenses")
 
@@ -422,7 +423,6 @@ if view_mode in ["Expenses", "Both"]:
     else:
         st.info("No expenses for the selected filters.")
 
-    # Monthly Expense Charts
     st.markdown("### 📅 Monthly Expense Charts")
     if not st.session_state.expenses.empty:
         chart_df = st.session_state.expenses.copy()
@@ -479,7 +479,6 @@ if view_mode in ["Expenses", "Both"]:
         }
     )
 
-    # Expense action buttons
     col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
 
     with col_save:
@@ -545,7 +544,9 @@ if view_mode in ["Expenses", "Both"]:
                 st.session_state.confirm_delete_all_exp = False
                 st.rerun()
 
-# ----- INCOME VIEW -----
+# ======================
+# INCOME SECTION
+# ======================
 if view_mode in ["Income", "Both"]:
     st.markdown("---")
     st.subheader("📈 Income")
@@ -572,7 +573,6 @@ if view_mode in ["Income", "Both"]:
     else:
         st.info("No income records for the selected filters.")
 
-    # Monthly Income Charts
     st.markdown("### 📅 Monthly Income Charts")
     if not st.session_state.income.empty:
         inc_chart = st.session_state.income.copy()
@@ -598,7 +598,7 @@ if view_mode in ["Income", "Both"]:
         display_inc["Date"] = pd.to_datetime(display_inc["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
         display_inc["Date"] = display_inc["Date"].fillna("")
     display_inc["Amount"] = clean_amount(display_inc["Amount"])
-    for col in ["User", "Category", "Source", "Description", "Remark"]:
+    for col in ["User", "Category", "Customer", "Description", "Remark", "Source"]:
         if col in display_inc.columns:
             display_inc[col] = display_inc[col].fillna("").astype(str)
     display_inc.insert(0, "No.", range(1, len(display_inc) + 1))
@@ -622,13 +622,13 @@ if view_mode in ["Income", "Both"]:
                 format="%,.2f",
                 required=True
             ),
-            "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
+            "Customer": st.column_config.TextColumn("Customer"),
             "Description": st.column_config.TextColumn("Description"),
             "Remark": st.column_config.TextColumn("Remark"),
+            "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
         }
     )
 
-    # Income action buttons
     col_save_i, col_del_i, col_del_all_i, _ = st.columns([1, 1, 1, 2])
 
     with col_save_i:
@@ -636,9 +636,10 @@ if view_mode in ["Income", "Both"]:
             clean_inc = edited_inc.drop(columns=["Select", "No."], errors="ignore").copy()
             clean_inc["Amount"] = clean_amount(clean_inc["Amount"])
             clean_inc["User"] = clean_inc["User"].fillna(USER).astype(str)
-            clean_inc["Source"] = clean_inc["Source"].fillna("Manual").astype(str)
+            clean_inc["Customer"] = clean_inc["Customer"].fillna("-").astype(str)
             clean_inc["Description"] = clean_inc["Description"].fillna("-").astype(str)
             clean_inc["Remark"] = clean_inc["Remark"].fillna("-").astype(str)
+            clean_inc["Source"] = clean_inc["Source"].fillna("Manual").astype(str)
             clean_inc["Category"] = clean_inc["Category"].fillna("").astype(str)
             clean_inc["Date"] = clean_inc["Date"].fillna("").astype(str)
             clean_inc = clean_inc[
@@ -665,7 +666,8 @@ if view_mode in ["Income", "Both"]:
                     mask = (
                         (original["Date"].astype(str).str[:10] == str(row["Date"])[:10]) &
                         (original["Category"] == row["Category"]) &
-                        (original["Amount"] == float(row["Amount"]))
+                        (original["Amount"] == float(row["Amount"])) &
+                        (original["Customer"].astype(str) == str(row["Customer"]))
                     )
                     original = original[~mask]
                 st.session_state.income = original.reset_index(drop=True)
