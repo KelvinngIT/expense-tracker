@@ -128,7 +128,6 @@ COLUMNS = [
     "Vendor", "Description", "Remark", "Source"
 ]
 
-# Updated: now includes Customer (same position as Vendor)
 INCOME_COLUMNS = [
     "Date", "User", "Category", "Amount",
     "Customer", "Description", "Remark", "Source"
@@ -217,7 +216,7 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
             st.rerun()
 
 # ======================
-# Sidebar - Add Income  (now matches Expense sequence + Customer)
+# Sidebar - Add Income
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("💵 Add New Income")
@@ -255,15 +254,16 @@ with st.sidebar.form("income_form", clear_on_submit=True):
             st.rerun()
 
 # ======================
-# Sidebar - Upload CSV
+# Sidebar - Upload Expenses
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("📥 Upload Expenses")
 
 uploaded_file = st.sidebar.file_uploader(
-    "Upload CSV file",
+    "Upload Expenses CSV",
     type=["csv"],
-    help="Preferred columns: Date, Category, Amount"
+    help="Preferred columns: Date, Category, Amount",
+    key="upload_expenses"
 )
 
 if uploaded_file is not None:
@@ -296,7 +296,7 @@ if uploaded_file is not None:
                 else:
                     import_df[col] = import_df[col].fillna(defaults.get(col, "-")).astype(str)
             import_df = import_df[COLUMNS]
-            if st.sidebar.button("Import Data", use_container_width=True, type="primary"):
+            if st.sidebar.button("Import Expenses", use_container_width=True, type="primary", key="import_exp"):
                 before = len(st.session_state.expenses)
                 st.session_state.expenses = pd.concat(
                     [st.session_state.expenses, import_df],
@@ -309,6 +309,64 @@ if uploaded_file is not None:
                 st.rerun()
     except Exception as e:
         st.sidebar.error(f"Error reading file: {e}")
+
+# ======================
+# Sidebar - Upload Income  ← NEW
+# ======================
+st.sidebar.markdown("---")
+st.sidebar.header("📥 Upload Income")
+
+uploaded_income = st.sidebar.file_uploader(
+    "Upload Income CSV",
+    type=["csv"],
+    help="Preferred columns: Date, Category, Amount",
+    key="upload_income"
+)
+
+if uploaded_income is not None:
+    try:
+        import_inc = pd.read_csv(uploaded_income)
+        import_inc.columns = import_inc.columns.str.strip().str.title()
+        min_required = {"Date", "Category", "Amount"}
+        if not min_required.issubset(set(import_inc.columns)):
+            st.sidebar.error(
+                f"Missing required columns.\nNeed at least: Date, Category, Amount\n"
+                f"Found: {', '.join(import_inc.columns)}"
+            )
+        else:
+            defaults = {
+                "User": USER,
+                "Customer": "-",
+                "Description": "-",
+                "Remark": "-",
+                "Source": "Import"
+            }
+            for col, default in defaults.items():
+                if col not in import_inc.columns:
+                    import_inc[col] = default
+            # Keep only columns that exist in INCOME_COLUMNS
+            import_inc = import_inc[[c for c in INCOME_COLUMNS if c in import_inc.columns]].copy()
+            import_inc["Amount"] = clean_amount(import_inc["Amount"])
+            import_inc = import_inc[import_inc["Amount"] > 0]
+            for col in INCOME_COLUMNS:
+                if col not in import_inc.columns:
+                    import_inc[col] = defaults.get(col, "-")
+                else:
+                    import_inc[col] = import_inc[col].fillna(defaults.get(col, "-")).astype(str)
+            import_inc = import_inc[INCOME_COLUMNS]
+            if st.sidebar.button("Import Income", use_container_width=True, type="primary", key="import_inc"):
+                before = len(st.session_state.income)
+                st.session_state.income = pd.concat(
+                    [st.session_state.income, import_inc],
+                    ignore_index=True
+                )
+                st.session_state.income["Amount"] = clean_amount(st.session_state.income["Amount"])
+                save_income()
+                added = len(st.session_state.income) - before
+                st.sidebar.success(f"Successfully imported {added} income records!")
+                st.rerun()
+    except Exception as e:
+        st.sidebar.error(f"Error reading income file: {e}")
 
 # ======================
 # Sidebar - Filters
