@@ -55,13 +55,11 @@ if "code_sent" not in st.session_state:
 st.sidebar.header("🔐 Login with Email")
 
 if not st.session_state.logged_in:
-
     # Step 1: Enter Email
     if not st.session_state.code_sent:
         with st.sidebar.form("email_form"):
             email = st.text_input("Email address", placeholder="you@example.com")
             send_btn = st.form_submit_button("Send Verification Code", use_container_width=True, type="primary")
-
             if send_btn:
                 email = email.strip().lower()
                 if not email:
@@ -69,21 +67,16 @@ if not st.session_state.logged_in:
                 elif not is_valid_email(email):
                     st.error("Please enter a valid email address.")
                 else:
-                    # Generate code
                     code = generate_verification_code()
                     st.session_state.verification_code = code
                     st.session_state.pending_email = email
                     st.session_state.code_sent = True
                     st.rerun()
-
     # Step 2: Enter Verification Code
     else:
         st.sidebar.info(f"Code sent to:\n**{st.session_state.pending_email}**")
-
-        # For testing – show the code (remove this in production)
         st.sidebar.warning(f"🧪 Demo Code: **{st.session_state.verification_code}**")
         st.sidebar.caption("In a real app this code would be sent by email.")
-
         with st.sidebar.form("verify_form"):
             user_code = st.text_input("Enter 6-digit verification code", max_chars=6)
             col1, col2 = st.columns(2)
@@ -91,18 +84,15 @@ if not st.session_state.logged_in:
                 verify_btn = st.form_submit_button("Verify & Login", use_container_width=True, type="primary")
             with col2:
                 back_btn = st.form_submit_button("← Back", use_container_width=True)
-
             if back_btn:
                 st.session_state.code_sent = False
                 st.session_state.verification_code = None
                 st.session_state.pending_email = None
                 st.rerun()
-
             if verify_btn:
                 if user_code.strip() == st.session_state.verification_code:
                     st.session_state.logged_in = True
                     st.session_state.user_email = st.session_state.pending_email
-                    # Clear verification data
                     st.session_state.code_sent = False
                     st.session_state.verification_code = None
                     st.session_state.pending_email = None
@@ -110,14 +100,13 @@ if not st.session_state.logged_in:
                     st.rerun()
                 else:
                     st.error("Incorrect verification code. Please try again.")
-
 else:
-    # Already logged in
     st.sidebar.success(f"Logged in as:\n**{st.session_state.user_email}**")
     if st.sidebar.button("Logout", use_container_width=True):
         st.session_state.logged_in = False
         st.session_state.user_email = None
         st.session_state.pop("expenses", None)
+        st.session_state.pop("income", None)
         st.rerun()
 
 # Stop the rest of the app if not logged in
@@ -131,16 +120,23 @@ if not st.session_state.logged_in:
 # ======================
 USER = st.session_state.user_email
 safe_user = sanitize_email(USER)
-
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
+
 USER_FILE = os.path.join(DATA_DIR, f"{safe_user}_expenses.csv")
+INCOME_FILE = os.path.join(DATA_DIR, f"{safe_user}_income.csv")
 
 COLUMNS = [
     "Date", "User", "Category", "Amount",
     "Vendor", "Description", "Remark", "Source"
 ]
 
+INCOME_COLUMNS = [
+    "Date", "User", "Category", "Amount",
+    "Source", "Description", "Remark"
+]
+
+# ---- Expenses ----
 if "expenses" not in st.session_state:
     if os.path.exists(USER_FILE):
         st.session_state.expenses = pd.read_csv(USER_FILE)
@@ -156,10 +152,31 @@ st.session_state.expenses["Amount"] = clean_amount(st.session_state.expenses["Am
 def save_data():
     st.session_state.expenses.to_csv(USER_FILE, index=False)
 
+# ---- Income ----
+if "income" not in st.session_state:
+    if os.path.exists(INCOME_FILE):
+        st.session_state.income = pd.read_csv(INCOME_FILE)
+        for col in INCOME_COLUMNS:
+            if col not in st.session_state.income.columns:
+                st.session_state.income[col] = ""
+        st.session_state.income = st.session_state.income[INCOME_COLUMNS]
+    else:
+        st.session_state.income = pd.DataFrame(columns=INCOME_COLUMNS)
+
+st.session_state.income["Amount"] = clean_amount(st.session_state.income["Amount"])
+
+def save_income():
+    st.session_state.income.to_csv(INCOME_FILE, index=False)
+
 CATEGORIES = [
     "Food & Dining", "Transportation", "Shopping", "Bills & Utilities",
     "Entertainment", "Health", "Education", "Travel",
     "Type", "Family Support", "Assets", "Other"
+]
+
+INCOME_CATEGORIES = [
+    "Salary", "Freelance", "Business", "Investment",
+    "Gift", "Refund", "Rental", "Other"
 ]
 
 SOURCES = ["Manual", "Bank", "Credit Card", "Cash", "Import", "Other"]
@@ -171,15 +188,14 @@ st.sidebar.markdown("---")
 st.sidebar.header("➕ Add New Expense")
 
 with st.sidebar.form("expense_form", clear_on_submit=True):
-    date = st.date_input("Date", value=datetime.now())
-    category = st.selectbox("Category", CATEGORIES)
-    amount = st.number_input("Amount ($)", min_value=0.0, step=0.01, format="%.2f")
-    vendor = st.text_input("Vendor", placeholder="e.g. Starbucks, Uber, Amazon...")
-    description = st.text_input("Description", placeholder="e.g. Lunch, Monthly subscription...")
-    remark = st.text_input("Remark", placeholder="Optional notes...")
-    source = st.selectbox("Source", SOURCES, index=0)
+    date = st.date_input("Date", value=datetime.now(), key="exp_date")
+    category = st.selectbox("Category", CATEGORIES, key="exp_cat")
+    amount = st.number_input("Amount ($)", min_value=0.0, step=0.01, format="%.2f", key="exp_amt")
+    vendor = st.text_input("Vendor", placeholder="e.g. Starbucks, Uber, Amazon...", key="exp_vendor")
+    description = st.text_input("Description", placeholder="e.g. Lunch, Monthly subscription...", key="exp_desc")
+    remark = st.text_input("Remark", placeholder="Optional notes...", key="exp_remark")
+    source = st.selectbox("Source", SOURCES, index=0, key="exp_source")
     submitted = st.form_submit_button("Add Expense", use_container_width=True)
-
     if submitted:
         if amount <= 0:
             st.error("Please enter a valid amount (> 0)")
@@ -203,6 +219,41 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
             st.rerun()
 
 # ======================
+# Sidebar - Add Income  ← NEW
+# ======================
+st.sidebar.markdown("---")
+st.sidebar.header("💵 Add New Income")
+
+with st.sidebar.form("income_form", clear_on_submit=True):
+    inc_date = st.date_input("Date", value=datetime.now(), key="inc_date")
+    inc_category = st.selectbox("Category", INCOME_CATEGORIES, key="inc_cat")
+    inc_amount = st.number_input("Amount ($)", min_value=0.0, step=0.01, format="%.2f", key="inc_amt")
+    inc_source = st.selectbox("Source", SOURCES, index=0, key="inc_source")
+    inc_description = st.text_input("Description", placeholder="e.g. Monthly salary, Client payment...", key="inc_desc")
+    inc_remark = st.text_input("Remark", placeholder="Optional notes...", key="inc_remark")
+    inc_submitted = st.form_submit_button("Add Income", use_container_width=True, type="primary")
+    if inc_submitted:
+        if inc_amount <= 0:
+            st.error("Please enter a valid amount (> 0)")
+        else:
+            new_inc = {
+                "Date": str(inc_date),
+                "User": USER,
+                "Category": inc_category,
+                "Amount": float(inc_amount),
+                "Source": inc_source,
+                "Description": inc_description.strip() if inc_description else "-",
+                "Remark": inc_remark.strip() if inc_remark else "-"
+            }
+            st.session_state.income = pd.concat(
+                [st.session_state.income, pd.DataFrame([new_inc])],
+                ignore_index=True
+            )
+            save_income()
+            st.success(f"Income added: {inc_category} - ${inc_amount:,.2f}")
+            st.rerun()
+
+# ======================
 # Sidebar - Upload CSV
 # ======================
 st.sidebar.markdown("---")
@@ -218,7 +269,6 @@ if uploaded_file is not None:
     try:
         import_df = pd.read_csv(uploaded_file)
         import_df.columns = import_df.columns.str.strip().str.title()
-
         min_required = {"Date", "Category", "Amount"}
         if not min_required.issubset(set(import_df.columns)):
             st.sidebar.error(
@@ -236,19 +286,15 @@ if uploaded_file is not None:
             for col, default in defaults.items():
                 if col not in import_df.columns:
                     import_df[col] = default
-
             import_df = import_df[[c for c in COLUMNS if c in import_df.columns]].copy()
             import_df["Amount"] = clean_amount(import_df["Amount"])
             import_df = import_df[import_df["Amount"] > 0]
-
             for col in COLUMNS:
                 if col not in import_df.columns:
                     import_df[col] = defaults.get(col, "-")
                 else:
                     import_df[col] = import_df[col].fillna(defaults.get(col, "-")).astype(str)
-
             import_df = import_df[COLUMNS]
-
             if st.sidebar.button("Import Data", use_container_width=True, type="primary"):
                 before = len(st.session_state.expenses)
                 st.session_state.expenses = pd.concat(
@@ -275,17 +321,13 @@ if not st.session_state.expenses.empty:
     )
     st.session_state.expenses["Year"] = st.session_state.expenses["Date"].dt.year
     st.session_state.expenses["Month"] = st.session_state.expenses["Date"].dt.month
-
     years = sorted(st.session_state.expenses["Year"].dropna().astype(int).unique())
     selected_year = st.sidebar.selectbox("Year", options=["All"] + list(years))
-
     months = sorted(st.session_state.expenses["Month"].dropna().astype(int).unique())
     month_names = {m: calendar.month_name[m] for m in months}
     month_options = ["All"] + [month_names[m] for m in months]
     selected_month = st.sidebar.selectbox("Month", options=month_options)
-
     filtered_df = st.session_state.expenses.copy()
-
     if selected_year != "All":
         filtered_df = filtered_df[filtered_df["Year"] == int(selected_year)]
     if selected_month != "All":
@@ -302,18 +344,33 @@ else:
 st.title("💰 Expense Tracker")
 st.markdown(f"Welcome, **{USER}**!")
 
-# Summary Metrics
+# Summary Metrics (Expense + Income + Net)
+col_m1, col_m2, col_m3 = st.columns(3)
+
+total_expense = 0.0
 if not filtered_df.empty:
     filtered_df["Amount"] = clean_amount(filtered_df["Amount"])
-    total = filtered_df["Amount"].sum()
-    st.metric("Total Spent", f"${total:,.2f}")
+    total_expense = filtered_df["Amount"].sum()
 
+total_income = 0.0
+if not st.session_state.income.empty:
+    total_income = clean_amount(st.session_state.income["Amount"]).sum()
+
+net = total_income - total_expense
+
+with col_m1:
+    st.metric("Total Spent", f"${total_expense:,.2f}")
+with col_m2:
+    st.metric("Total Income", f"${total_income:,.2f}")
+with col_m3:
+    st.metric("Net Balance", f"${net:,.2f}", delta=f"{'Surplus' if net >= 0 else 'Deficit'}")
+
+if not filtered_df.empty:
     by_category = (
         filtered_df.groupby("Category")["Amount"]
         .sum()
         .sort_values(ascending=False)
     )
-
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Spending by Category")
@@ -342,37 +399,29 @@ if not st.session_state.expenses.empty:
     chart_df["Amount"] = clean_amount(chart_df["Amount"])
     chart_df["Date"] = pd.to_datetime(chart_df["Date"], errors="coerce")
     chart_df = chart_df.dropna(subset=["Date"])
-
     if selected_year != "All":
         chart_df = chart_df[chart_df["Date"].dt.year == int(selected_year)]
-
     if not chart_df.empty:
         chart_df["YearMonth"] = chart_df["Date"].dt.to_period("M").astype(str)
-
         monthly_total = (
             chart_df.groupby("YearMonth")["Amount"]
             .sum()
             .sort_index()
         )
-
         st.markdown("### Total Spending by Month")
         st.bar_chart(monthly_total, use_container_width=True)
-
         monthly_table = monthly_total.reset_index()
         monthly_table.columns = ["Month", "Total ($)"]
         monthly_table["Total ($)"] = monthly_table["Total ($)"].map(lambda x: f"${x:,.2f}")
         st.dataframe(monthly_table, use_container_width=True, hide_index=True)
-
         st.markdown("---")
         st.markdown("### Monthly Spending by Category")
-
         monthly_cat = (
             chart_df.groupby(["YearMonth", "Category"])["Amount"]
             .sum()
             .unstack(fill_value=0)
             .sort_index()
         )
-
         if not monthly_cat.empty:
             st.bar_chart(monthly_cat, use_container_width=True)
             with st.expander("View Monthly Category Breakdown"):
@@ -395,17 +444,13 @@ st.markdown("---")
 st.subheader("All Expenses (Filtered)")
 
 display_df = filtered_df.copy().reset_index(drop=True)
-
 if "Date" in display_df.columns:
     display_df["Date"] = pd.to_datetime(display_df["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
     display_df["Date"] = display_df["Date"].fillna("")
-
 display_df["Amount"] = clean_amount(display_df["Amount"])
-
 for col in ["User", "Category", "Vendor", "Description", "Remark", "Source"]:
     if col in display_df.columns:
         display_df[col] = display_df[col].fillna("").astype(str)
-
 display_df.insert(0, "No.", range(1, len(display_df) + 1))
 display_df.insert(1, "Select", False)
 
@@ -419,87 +464,4 @@ edited_df = st.data_editor(
         "No.": st.column_config.NumberColumn("No.", width="small", disabled=True),
         "Select": st.column_config.CheckboxColumn("Select", default=False),
         "Date": st.column_config.TextColumn("Date"),
-        "User": st.column_config.TextColumn("User"),
-        "Category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True),
-        "Amount": st.column_config.NumberColumn(
-            "Amount ($)",
-            min_value=0.0,
-            format="%,.2f",
-            required=True
-        ),
-        "Vendor": st.column_config.TextColumn("Vendor"),
-        "Description": st.column_config.TextColumn("Description"),
-        "Remark": st.column_config.TextColumn("Remark"),
-        "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
-    }
-)
-
-# ---------- Buttons ----------
-col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
-
-with col_save:
-    if st.button("💾 Save Changes / Add Rows", type="primary", use_container_width=True):
-        clean_df = edited_df.drop(columns=["Select", "No."], errors="ignore").copy()
-        clean_df["Amount"] = clean_amount(clean_df["Amount"])
-        clean_df["User"] = clean_df["User"].fillna(USER).astype(str)
-        clean_df["Vendor"] = clean_df["Vendor"].fillna("-").astype(str)
-        clean_df["Description"] = clean_df["Description"].fillna("-").astype(str)
-        clean_df["Remark"] = clean_df["Remark"].fillna("-").astype(str)
-        clean_df["Source"] = clean_df["Source"].fillna("Manual").astype(str)
-        clean_df["Category"] = clean_df["Category"].fillna("").astype(str)
-        clean_df["Date"] = clean_df["Date"].fillna("").astype(str)
-
-        clean_df = clean_df[
-            (clean_df["Category"].str.strip() != "") &
-            (clean_df["Amount"] > 0)
-        ]
-
-        if selected_year == "All" and selected_month == "All":
-            st.session_state.expenses = clean_df[COLUMNS].reset_index(drop=True)
-            save_data()
-            st.success("Changes and new rows saved successfully!")
-            st.rerun()
-        else:
-            st.warning("Please set Year & Month to **All** before saving.")
-
-with col_del:
-    if st.button("🗑️ Delete Selected", use_container_width=True):
-        selected_mask = edited_df["Select"] == True
-        if not selected_mask.any():
-            st.warning("Please select at least one row.")
-        else:
-            to_delete = edited_df[selected_mask]
-            original = st.session_state.expenses.copy()
-
-            for _, row in to_delete.iterrows():
-                mask = (
-                    (original["Date"].astype(str).str[:10] == str(row["Date"])[:10]) &
-                    (original["Category"] == row["Category"]) &
-                    (original["Amount"] == float(row["Amount"])) &
-                    (original["Vendor"].astype(str) == str(row["Vendor"]))
-                )
-                original = original[~mask]
-
-            st.session_state.expenses = original.reset_index(drop=True)
-            save_data()
-            st.success(f"Deleted {selected_mask.sum()} expense(s).")
-            st.rerun()
-
-with col_del_all:
-    if st.button("💥 Delete All", use_container_width=True):
-        st.session_state.confirm_delete_all = True
-
-if st.session_state.get("confirm_delete_all", False):
-    st.warning("⚠️ Are you sure you want to delete **ALL** expenses?")
-    c1, c2, _ = st.columns([1, 1, 3])
-    with c1:
-        if st.button("✅ Yes, Delete Everything", type="primary"):
-            st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
-            save_data()
-            st.session_state.confirm_delete_all = False
-            st.success("All expenses deleted.")
-            st.rerun()
-    with c2:
-        if st.button("❌ Cancel"):
-            st.session_state.confirm_delete_all = False
-            st.rerun()
+        "User": st.column_config.TextColumn("User
