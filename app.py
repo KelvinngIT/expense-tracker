@@ -55,7 +55,6 @@ if "code_sent" not in st.session_state:
 st.sidebar.header("🔐 Login with Email")
 
 if not st.session_state.logged_in:
-    # Step 1: Enter Email
     if not st.session_state.code_sent:
         with st.sidebar.form("email_form"):
             email = st.text_input("Email address", placeholder="you@example.com")
@@ -72,7 +71,6 @@ if not st.session_state.logged_in:
                     st.session_state.pending_email = email
                     st.session_state.code_sent = True
                     st.rerun()
-    # Step 2: Enter Verification Code
     else:
         st.sidebar.info(f"Code sent to:\n**{st.session_state.pending_email}**")
         st.sidebar.warning(f"🧪 Demo Code: **{st.session_state.verification_code}**")
@@ -109,14 +107,13 @@ else:
         st.session_state.pop("income", None)
         st.rerun()
 
-# Stop the rest of the app if not logged in
 if not st.session_state.logged_in:
     st.title("💰 Expense Tracker")
     st.info("👈 Please login with your email in the sidebar to continue.")
     st.stop()
 
 # ======================
-# User Data Setup (after successful login)
+# User Data Setup
 # ======================
 USER = st.session_state.user_email
 safe_user = sanitize_email(USER)
@@ -310,33 +307,68 @@ if uploaded_file is not None:
         st.sidebar.error(f"Error reading file: {e}")
 
 # ======================
-# Sidebar - Filters
+# Sidebar - Filters (with Expense / Income buttons)
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("🔍 Filters")
 
+# NEW: Expense / Income / Both filter
+view_mode = st.sidebar.radio(
+    "Show",
+    options=["Expenses", "Income", "Both"],
+    index=0,
+    horizontal=True,
+    key="view_mode"
+)
+
+# Prepare Year / Month options from both datasets
+all_dates = []
 if not st.session_state.expenses.empty:
-    st.session_state.expenses["Date"] = pd.to_datetime(
-        st.session_state.expenses["Date"], errors="coerce"
-    )
-    st.session_state.expenses["Year"] = st.session_state.expenses["Date"].dt.year
-    st.session_state.expenses["Month"] = st.session_state.expenses["Date"].dt.month
-    years = sorted(st.session_state.expenses["Year"].dropna().astype(int).unique())
-    selected_year = st.sidebar.selectbox("Year", options=["All"] + list(years))
-    months = sorted(st.session_state.expenses["Month"].dropna().astype(int).unique())
+    exp_dates = pd.to_datetime(st.session_state.expenses["Date"], errors="coerce")
+    all_dates.extend(exp_dates.dropna().tolist())
+if not st.session_state.income.empty:
+    inc_dates = pd.to_datetime(st.session_state.income["Date"], errors="coerce")
+    all_dates.extend(inc_dates.dropna().tolist())
+
+if all_dates:
+    all_dates = pd.Series(all_dates)
+    years = sorted(all_dates.dt.year.dropna().astype(int).unique())
+    months = sorted(all_dates.dt.month.dropna().astype(int).unique())
     month_names = {m: calendar.month_name[m] for m in months}
     month_options = ["All"] + [month_names[m] for m in months]
-    selected_month = st.sidebar.selectbox("Month", options=month_options)
-    filtered_df = st.session_state.expenses.copy()
+else:
+    years = []
+    month_options = ["All"]
+    month_names = {}
+
+selected_year = st.sidebar.selectbox("Year", options=["All"] + list(years) if years else ["All"])
+selected_month = st.sidebar.selectbox("Month", options=month_options)
+
+# ---- Filter Expenses ----
+filtered_expenses = st.session_state.expenses.copy()
+if not filtered_expenses.empty:
+    filtered_expenses["Date"] = pd.to_datetime(filtered_expenses["Date"], errors="coerce")
+    filtered_expenses["Year"] = filtered_expenses["Date"].dt.year
+    filtered_expenses["Month"] = filtered_expenses["Date"].dt.month
     if selected_year != "All":
-        filtered_df = filtered_df[filtered_df["Year"] == int(selected_year)]
+        filtered_expenses = filtered_expenses[filtered_expenses["Year"] == int(selected_year)]
     if selected_month != "All":
         month_num = [k for k, v in month_names.items() if v == selected_month][0]
-        filtered_df = filtered_df[filtered_df["Month"] == month_num]
-else:
-    filtered_df = st.session_state.expenses.copy()
-    selected_year = "All"
-    selected_month = "All"
+        filtered_expenses = filtered_expenses[filtered_expenses["Month"] == month_num]
+    filtered_expenses["Amount"] = clean_amount(filtered_expenses["Amount"])
+
+# ---- Filter Income ----
+filtered_income = st.session_state.income.copy()
+if not filtered_income.empty:
+    filtered_income["Date"] = pd.to_datetime(filtered_income["Date"], errors="coerce")
+    filtered_income["Year"] = filtered_income["Date"].dt.year
+    filtered_income["Month"] = filtered_income["Date"].dt.month
+    if selected_year != "All":
+        filtered_income = filtered_income[filtered_income["Year"] == int(selected_year)]
+    if selected_month != "All":
+        month_num = [k for k, v in month_names.items() if v == selected_month][0]
+        filtered_income = filtered_income[filtered_income["Month"] == month_num]
+    filtered_income["Amount"] = clean_amount(filtered_income["Amount"])
 
 # ======================
 # Main Area
@@ -344,18 +376,11 @@ else:
 st.title("💰 Expense Tracker")
 st.markdown(f"Welcome, **{USER}**!")
 
-# Summary Metrics (Expense + Income + Net)
+# Summary Metrics
 col_m1, col_m2, col_m3 = st.columns(3)
 
-total_expense = 0.0
-if not filtered_df.empty:
-    filtered_df["Amount"] = clean_amount(filtered_df["Amount"])
-    total_expense = filtered_df["Amount"].sum()
-
-total_income = 0.0
-if not st.session_state.income.empty:
-    total_income = clean_amount(st.session_state.income["Amount"]).sum()
-
+total_expense = filtered_expenses["Amount"].sum() if not filtered_expenses.empty else 0.0
+total_income = filtered_income["Amount"].sum() if not filtered_income.empty else 0.0
 net = total_income - total_expense
 
 with col_m1:
@@ -363,184 +388,306 @@ with col_m1:
 with col_m2:
     st.metric("Total Income", f"${total_income:,.2f}")
 with col_m3:
-    st.metric("Net Balance", f"${net:,.2f}", delta=f"{'Surplus' if net >= 0 else 'Deficit'}")
-
-if not filtered_df.empty:
-    by_category = (
-        filtered_df.groupby("Category")["Amount"]
-        .sum()
-        .sort_values(ascending=False)
-    )
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Spending by Category")
-        st.dataframe(
-            by_category.reset_index()
-            .rename(columns={"Amount": "Total ($)"})
-            .style.format({"Total ($)": "{:,.2f}"}),
-            use_container_width=True,
-            hide_index=True
-        )
-    with col2:
-        st.subheader("Category Chart")
-        st.bar_chart(by_category)
-else:
-    st.info("No expenses recorded yet. Add your first expense from the sidebar!")
+    st.metric("Net Balance", f"${net:,.2f}", delta="Surplus" if net >= 0 else "Deficit")
 
 st.markdown("---")
 
 # ======================
-# Monthly Expense Charts
+# Content based on view_mode
 # ======================
-st.subheader("📅 Monthly Expense Charts")
 
-if not st.session_state.expenses.empty:
-    chart_df = st.session_state.expenses.copy()
-    chart_df["Amount"] = clean_amount(chart_df["Amount"])
-    chart_df["Date"] = pd.to_datetime(chart_df["Date"], errors="coerce")
-    chart_df = chart_df.dropna(subset=["Date"])
-    if selected_year != "All":
-        chart_df = chart_df[chart_df["Date"].dt.year == int(selected_year)]
-    if not chart_df.empty:
-        chart_df["YearMonth"] = chart_df["Date"].dt.to_period("M").astype(str)
-        monthly_total = (
-            chart_df.groupby("YearMonth")["Amount"]
+# ----- EXPENSES VIEW -----
+if view_mode in ["Expenses", "Both"]:
+    st.subheader("📉 Expenses")
+
+    if not filtered_expenses.empty:
+        by_category = (
+            filtered_expenses.groupby("Category")["Amount"]
             .sum()
-            .sort_index()
+            .sort_values(ascending=False)
         )
-        st.markdown("### Total Spending by Month")
-        st.bar_chart(monthly_total, use_container_width=True)
-        monthly_table = monthly_total.reset_index()
-        monthly_table.columns = ["Month", "Total ($)"]
-        monthly_table["Total ($)"] = monthly_table["Total ($)"].map(lambda x: f"${x:,.2f}")
-        st.dataframe(monthly_table, use_container_width=True, hide_index=True)
-        st.markdown("---")
-        st.markdown("### Monthly Spending by Category")
-        monthly_cat = (
-            chart_df.groupby(["YearMonth", "Category"])["Amount"]
-            .sum()
-            .unstack(fill_value=0)
-            .sort_index()
-        )
-        if not monthly_cat.empty:
-            st.bar_chart(monthly_cat, use_container_width=True)
-            with st.expander("View Monthly Category Breakdown"):
-                st.dataframe(
-                    monthly_cat.style.format("{:,.2f}"),
-                    use_container_width=True
-                )
-        else:
-            st.info("Not enough data for category breakdown.")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Spending by Category**")
+            st.dataframe(
+                by_category.reset_index()
+                .rename(columns={"Amount": "Total ($)"})
+                .style.format({"Total ($)": "{:,.2f}"}),
+                use_container_width=True,
+                hide_index=True
+            )
+        with col2:
+            st.markdown("**Category Chart**")
+            st.bar_chart(by_category)
     else:
-        st.info("No data available for the selected year.")
-else:
-    st.info("Add some expenses to see monthly charts.")
+        st.info("No expenses for the selected filters.")
 
-st.markdown("---")
-
-# ======================
-# All Expenses Table
-# ======================
-st.subheader("All Expenses (Filtered)")
-
-display_df = filtered_df.copy().reset_index(drop=True)
-if "Date" in display_df.columns:
-    display_df["Date"] = pd.to_datetime(display_df["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
-    display_df["Date"] = display_df["Date"].fillna("")
-display_df["Amount"] = clean_amount(display_df["Amount"])
-for col in ["User", "Category", "Vendor", "Description", "Remark", "Source"]:
-    if col in display_df.columns:
-        display_df[col] = display_df[col].fillna("").astype(str)
-display_df.insert(0, "No.", range(1, len(display_df) + 1))
-display_df.insert(1, "Select", False)
-
-edited_df = st.data_editor(
-    display_df,
-    num_rows="dynamic",
-    hide_index=True,
-    use_container_width=True,
-    key="expense_editor",
-    column_config={
-        "No.": st.column_config.NumberColumn("No.", width="small", disabled=True),
-        "Select": st.column_config.CheckboxColumn("Select", default=False),
-        "Date": st.column_config.TextColumn("Date"),
-        "User": st.column_config.TextColumn("User"),
-        "Category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True),
-        "Amount": st.column_config.NumberColumn(
-            "Amount ($)",
-            min_value=0.0,
-            format="%,.2f",
-            required=True
-        ),
-        "Vendor": st.column_config.TextColumn("Vendor"),
-        "Description": st.column_config.TextColumn("Description"),
-        "Remark": st.column_config.TextColumn("Remark"),
-        "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
-    }
-)
-
-# ---------- Buttons ----------
-col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
-
-with col_save:
-    if st.button("💾 Save Changes / Add Rows", type="primary", use_container_width=True):
-        clean_df = edited_df.drop(columns=["Select", "No."], errors="ignore").copy()
-        clean_df["Amount"] = clean_amount(clean_df["Amount"])
-        clean_df["User"] = clean_df["User"].fillna(USER).astype(str)
-        clean_df["Vendor"] = clean_df["Vendor"].fillna("-").astype(str)
-        clean_df["Description"] = clean_df["Description"].fillna("-").astype(str)
-        clean_df["Remark"] = clean_df["Remark"].fillna("-").astype(str)
-        clean_df["Source"] = clean_df["Source"].fillna("Manual").astype(str)
-        clean_df["Category"] = clean_df["Category"].fillna("").astype(str)
-        clean_df["Date"] = clean_df["Date"].fillna("").astype(str)
-        clean_df = clean_df[
-            (clean_df["Category"].str.strip() != "") &
-            (clean_df["Amount"] > 0)
-        ]
-        if selected_year == "All" and selected_month == "All":
-            st.session_state.expenses = clean_df[COLUMNS].reset_index(drop=True)
-            save_data()
-            st.success("Changes and new rows saved successfully!")
-            st.rerun()
+    # Monthly Expense Charts
+    st.markdown("### 📅 Monthly Expense Charts")
+    if not st.session_state.expenses.empty:
+        chart_df = st.session_state.expenses.copy()
+        chart_df["Amount"] = clean_amount(chart_df["Amount"])
+        chart_df["Date"] = pd.to_datetime(chart_df["Date"], errors="coerce")
+        chart_df = chart_df.dropna(subset=["Date"])
+        if selected_year != "All":
+            chart_df = chart_df[chart_df["Date"].dt.year == int(selected_year)]
+        if not chart_df.empty:
+            chart_df["YearMonth"] = chart_df["Date"].dt.to_period("M").astype(str)
+            monthly_total = chart_df.groupby("YearMonth")["Amount"].sum().sort_index()
+            st.bar_chart(monthly_total, use_container_width=True)
         else:
-            st.warning("Please set Year & Month to **All** before saving.")
+            st.info("No expense data for charts.")
+    else:
+        st.info("Add some expenses to see monthly charts.")
 
-with col_del:
-    if st.button("🗑️ Delete Selected", use_container_width=True):
-        selected_mask = edited_df["Select"] == True
-        if not selected_mask.any():
-            st.warning("Please select at least one row.")
+    st.markdown("---")
+    st.subheader("All Expenses (Filtered)")
+
+    display_df = filtered_expenses.copy().reset_index(drop=True)
+    if "Date" in display_df.columns:
+        display_df["Date"] = pd.to_datetime(display_df["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
+        display_df["Date"] = display_df["Date"].fillna("")
+    display_df["Amount"] = clean_amount(display_df["Amount"])
+    for col in ["User", "Category", "Vendor", "Description", "Remark", "Source"]:
+        if col in display_df.columns:
+            display_df[col] = display_df[col].fillna("").astype(str)
+    display_df.insert(0, "No.", range(1, len(display_df) + 1))
+    display_df.insert(1, "Select", False)
+
+    edited_df = st.data_editor(
+        display_df,
+        num_rows="dynamic",
+        hide_index=True,
+        use_container_width=True,
+        key="expense_editor",
+        column_config={
+            "No.": st.column_config.NumberColumn("No.", width="small", disabled=True),
+            "Select": st.column_config.CheckboxColumn("Select", default=False),
+            "Date": st.column_config.TextColumn("Date"),
+            "User": st.column_config.TextColumn("User"),
+            "Category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True),
+            "Amount": st.column_config.NumberColumn(
+                "Amount ($)",
+                min_value=0.0,
+                format="%,.2f",
+                required=True
+            ),
+            "Vendor": st.column_config.TextColumn("Vendor"),
+            "Description": st.column_config.TextColumn("Description"),
+            "Remark": st.column_config.TextColumn("Remark"),
+            "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
+        }
+    )
+
+    # Expense action buttons
+    col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
+
+    with col_save:
+        if st.button("💾 Save Changes / Add Rows", type="primary", use_container_width=True, key="save_exp"):
+            clean_df = edited_df.drop(columns=["Select", "No."], errors="ignore").copy()
+            clean_df["Amount"] = clean_amount(clean_df["Amount"])
+            clean_df["User"] = clean_df["User"].fillna(USER).astype(str)
+            clean_df["Vendor"] = clean_df["Vendor"].fillna("-").astype(str)
+            clean_df["Description"] = clean_df["Description"].fillna("-").astype(str)
+            clean_df["Remark"] = clean_df["Remark"].fillna("-").astype(str)
+            clean_df["Source"] = clean_df["Source"].fillna("Manual").astype(str)
+            clean_df["Category"] = clean_df["Category"].fillna("").astype(str)
+            clean_df["Date"] = clean_df["Date"].fillna("").astype(str)
+            clean_df = clean_df[
+                (clean_df["Category"].str.strip() != "") &
+                (clean_df["Amount"] > 0)
+            ]
+            if selected_year == "All" and selected_month == "All":
+                st.session_state.expenses = clean_df[COLUMNS].reset_index(drop=True)
+                save_data()
+                st.success("Changes and new rows saved successfully!")
+                st.rerun()
+            else:
+                st.warning("Please set Year & Month to **All** before saving.")
+
+    with col_del:
+        if st.button("🗑️ Delete Selected", use_container_width=True, key="del_exp"):
+            selected_mask = edited_df["Select"] == True
+            if not selected_mask.any():
+                st.warning("Please select at least one row.")
+            else:
+                to_delete = edited_df[selected_mask]
+                original = st.session_state.expenses.copy()
+                for _, row in to_delete.iterrows():
+                    mask = (
+                        (original["Date"].astype(str).str[:10] == str(row["Date"])[:10]) &
+                        (original["Category"] == row["Category"]) &
+                        (original["Amount"] == float(row["Amount"])) &
+                        (original["Vendor"].astype(str) == str(row["Vendor"]))
+                    )
+                    original = original[~mask]
+                st.session_state.expenses = original.reset_index(drop=True)
+                save_data()
+                st.success(f"Deleted {selected_mask.sum()} expense(s).")
+                st.rerun()
+
+    with col_del_all:
+        if st.button("💥 Delete All Expenses", use_container_width=True, key="del_all_exp"):
+            st.session_state.confirm_delete_all_exp = True
+
+    if st.session_state.get("confirm_delete_all_exp", False):
+        st.warning("⚠️ Are you sure you want to delete **ALL** expenses?")
+        c1, c2, _ = st.columns([1, 1, 3])
+        with c1:
+            if st.button("✅ Yes, Delete Everything", type="primary", key="confirm_del_exp"):
+                st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
+                save_data()
+                st.session_state.confirm_delete_all_exp = False
+                st.success("All expenses deleted.")
+                st.rerun()
+        with c2:
+            if st.button("❌ Cancel", key="cancel_del_exp"):
+                st.session_state.confirm_delete_all_exp = False
+                st.rerun()
+
+# ----- INCOME VIEW -----
+if view_mode in ["Income", "Both"]:
+    st.markdown("---")
+    st.subheader("📈 Income")
+
+    if not filtered_income.empty:
+        by_inc_cat = (
+            filtered_income.groupby("Category")["Amount"]
+            .sum()
+            .sort_values(ascending=False)
+        )
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Income by Category**")
+            st.dataframe(
+                by_inc_cat.reset_index()
+                .rename(columns={"Amount": "Total ($)"})
+                .style.format({"Total ($)": "{:,.2f}"}),
+                use_container_width=True,
+                hide_index=True
+            )
+        with col2:
+            st.markdown("**Income Category Chart**")
+            st.bar_chart(by_inc_cat)
+    else:
+        st.info("No income records for the selected filters.")
+
+    # Monthly Income Charts
+    st.markdown("### 📅 Monthly Income Charts")
+    if not st.session_state.income.empty:
+        inc_chart = st.session_state.income.copy()
+        inc_chart["Amount"] = clean_amount(inc_chart["Amount"])
+        inc_chart["Date"] = pd.to_datetime(inc_chart["Date"], errors="coerce")
+        inc_chart = inc_chart.dropna(subset=["Date"])
+        if selected_year != "All":
+            inc_chart = inc_chart[inc_chart["Date"].dt.year == int(selected_year)]
+        if not inc_chart.empty:
+            inc_chart["YearMonth"] = inc_chart["Date"].dt.to_period("M").astype(str)
+            monthly_inc = inc_chart.groupby("YearMonth")["Amount"].sum().sort_index()
+            st.bar_chart(monthly_inc, use_container_width=True)
         else:
-            to_delete = edited_df[selected_mask]
-            original = st.session_state.expenses.copy()
-            for _, row in to_delete.iterrows():
-                mask = (
-                    (original["Date"].astype(str).str[:10] == str(row["Date"])[:10]) &
-                    (original["Category"] == row["Category"]) &
-                    (original["Amount"] == float(row["Amount"])) &
-                    (original["Vendor"].astype(str) == str(row["Vendor"]))
-                )
-                original = original[~mask]
-            st.session_state.expenses = original.reset_index(drop=True)
-            save_data()
-            st.success(f"Deleted {selected_mask.sum()} expense(s).")
-            st.rerun()
+            st.info("No income data for charts.")
+    else:
+        st.info("Add some income to see monthly charts.")
 
-with col_del_all:
-    if st.button("💥 Delete All", use_container_width=True):
-        st.session_state.confirm_delete_all = True
+    st.markdown("---")
+    st.subheader("All Income (Filtered)")
 
-if st.session_state.get("confirm_delete_all", False):
-    st.warning("⚠️ Are you sure you want to delete **ALL** expenses?")
-    c1, c2, _ = st.columns([1, 1, 3])
-    with c1:
-        if st.button("✅ Yes, Delete Everything", type="primary"):
-            st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
-            save_data()
-            st.session_state.confirm_delete_all = False
-            st.success("All expenses deleted.")
-            st.rerun()
-    with c2:
-        if st.button("❌ Cancel"):
-            st.session_state.confirm_delete_all = False
-            st.rerun()
+    display_inc = filtered_income.copy().reset_index(drop=True)
+    if "Date" in display_inc.columns:
+        display_inc["Date"] = pd.to_datetime(display_inc["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
+        display_inc["Date"] = display_inc["Date"].fillna("")
+    display_inc["Amount"] = clean_amount(display_inc["Amount"])
+    for col in ["User", "Category", "Source", "Description", "Remark"]:
+        if col in display_inc.columns:
+            display_inc[col] = display_inc[col].fillna("").astype(str)
+    display_inc.insert(0, "No.", range(1, len(display_inc) + 1))
+    display_inc.insert(1, "Select", False)
+
+    edited_inc = st.data_editor(
+        display_inc,
+        num_rows="dynamic",
+        hide_index=True,
+        use_container_width=True,
+        key="income_editor",
+        column_config={
+            "No.": st.column_config.NumberColumn("No.", width="small", disabled=True),
+            "Select": st.column_config.CheckboxColumn("Select", default=False),
+            "Date": st.column_config.TextColumn("Date"),
+            "User": st.column_config.TextColumn("User"),
+            "Category": st.column_config.SelectboxColumn("Category", options=INCOME_CATEGORIES, required=True),
+            "Amount": st.column_config.NumberColumn(
+                "Amount ($)",
+                min_value=0.0,
+                format="%,.2f",
+                required=True
+            ),
+            "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
+            "Description": st.column_config.TextColumn("Description"),
+            "Remark": st.column_config.TextColumn("Remark"),
+        }
+    )
+
+    # Income action buttons
+    col_save_i, col_del_i, col_del_all_i, _ = st.columns([1, 1, 1, 2])
+
+    with col_save_i:
+        if st.button("💾 Save Income Changes", type="primary", use_container_width=True, key="save_inc"):
+            clean_inc = edited_inc.drop(columns=["Select", "No."], errors="ignore").copy()
+            clean_inc["Amount"] = clean_amount(clean_inc["Amount"])
+            clean_inc["User"] = clean_inc["User"].fillna(USER).astype(str)
+            clean_inc["Source"] = clean_inc["Source"].fillna("Manual").astype(str)
+            clean_inc["Description"] = clean_inc["Description"].fillna("-").astype(str)
+            clean_inc["Remark"] = clean_inc["Remark"].fillna("-").astype(str)
+            clean_inc["Category"] = clean_inc["Category"].fillna("").astype(str)
+            clean_inc["Date"] = clean_inc["Date"].fillna("").astype(str)
+            clean_inc = clean_inc[
+                (clean_inc["Category"].str.strip() != "") &
+                (clean_inc["Amount"] > 0)
+            ]
+            if selected_year == "All" and selected_month == "All":
+                st.session_state.income = clean_inc[INCOME_COLUMNS].reset_index(drop=True)
+                save_income()
+                st.success("Income changes saved!")
+                st.rerun()
+            else:
+                st.warning("Please set Year & Month to **All** before saving.")
+
+    with col_del_i:
+        if st.button("🗑️ Delete Selected Income", use_container_width=True, key="del_inc"):
+            selected_mask = edited_inc["Select"] == True
+            if not selected_mask.any():
+                st.warning("Please select at least one row.")
+            else:
+                to_delete = edited_inc[selected_mask]
+                original = st.session_state.income.copy()
+                for _, row in to_delete.iterrows():
+                    mask = (
+                        (original["Date"].astype(str).str[:10] == str(row["Date"])[:10]) &
+                        (original["Category"] == row["Category"]) &
+                        (original["Amount"] == float(row["Amount"]))
+                    )
+                    original = original[~mask]
+                st.session_state.income = original.reset_index(drop=True)
+                save_income()
+                st.success(f"Deleted {selected_mask.sum()} income record(s).")
+                st.rerun()
+
+    with col_del_all_i:
+        if st.button("💥 Delete All Income", use_container_width=True, key="del_all_inc"):
+            st.session_state.confirm_delete_all_inc = True
+
+    if st.session_state.get("confirm_delete_all_inc", False):
+        st.warning("⚠️ Are you sure you want to delete **ALL** income records?")
+        c1, c2, _ = st.columns([1, 1, 3])
+        with c1:
+            if st.button("✅ Yes, Delete All Income", type="primary", key="confirm_del_inc"):
+                st.session_state.income = pd.DataFrame(columns=INCOME_COLUMNS)
+                save_income()
+                st.session_state.confirm_delete_all_inc = False
+                st.success("All income records deleted.")
+                st.rerun()
+        with c2:
+            if st.button("❌ Cancel", key="cancel_del_inc"):
+                st.session_state.confirm_delete_all_inc = False
+                st.rerun()
