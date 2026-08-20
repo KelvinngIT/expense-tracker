@@ -119,7 +119,6 @@ USER = st.session_state.user_email
 safe_user = sanitize_email(USER)
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
-
 USER_FILE = os.path.join(DATA_DIR, f"{safe_user}_expenses.csv")
 INCOME_FILE = os.path.join(DATA_DIR, f"{safe_user}_income.csv")
 
@@ -127,7 +126,6 @@ COLUMNS = [
     "Date", "User", "Category", "Amount",
     "Vendor", "Description", "Remark", "Source"
 ]
-
 INCOME_COLUMNS = [
     "Date", "User", "Category", "Amount",
     "Customer", "Description", "Remark", "Source"
@@ -170,12 +168,10 @@ CATEGORIES = [
     "Entertainment", "Health", "Education", "Travel",
     "Type", "Family Support", "Assets", "Other"
 ]
-
 INCOME_CATEGORIES = [
     "Salary", "Freelance", "Business", "Investment",
     "Gift", "Refund", "Rental", "Other"
 ]
-
 SOURCES = ["Manual", "Bank", "Credit Card", "Cash", "Import", "Other"]
 
 # ======================
@@ -183,7 +179,6 @@ SOURCES = ["Manual", "Bank", "Credit Card", "Cash", "Import", "Other"]
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("➕ Add New Expense")
-
 with st.sidebar.form("expense_form", clear_on_submit=True):
     date = st.date_input("Date", value=datetime.now(), key="exp_date")
     category = st.selectbox("Category", CATEGORIES, key="exp_cat")
@@ -220,7 +215,6 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("💵 Add New Income")
-
 with st.sidebar.form("income_form", clear_on_submit=True):
     inc_date = st.date_input("Date", value=datetime.now(), key="inc_date")
     inc_category = st.selectbox("Category", INCOME_CATEGORIES, key="inc_cat")
@@ -230,7 +224,7 @@ with st.sidebar.form("income_form", clear_on_submit=True):
     inc_remark = st.text_input("Remark", placeholder="Optional notes...", key="inc_remark")
     inc_source = st.selectbox("Source", SOURCES, index=0, key="inc_source")
     inc_submitted = st.form_submit_button("Add Income", use_container_width=True, type="primary")
-    
+   
     if inc_submitted:
         if inc_amount <= 0:
             st.error("Please enter a valid amount (> 0)")
@@ -258,14 +252,12 @@ with st.sidebar.form("income_form", clear_on_submit=True):
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("📥 Upload Expenses")
-
 uploaded_file = st.sidebar.file_uploader(
     "Upload Expenses CSV",
     type=["csv"],
     help="Preferred columns: Date, Category, Amount",
     key="upload_expenses"
 )
-
 if uploaded_file is not None:
     try:
         import_df = pd.read_csv(uploaded_file)
@@ -315,14 +307,12 @@ if uploaded_file is not None:
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("📥 Upload Income")
-
 uploaded_income = st.sidebar.file_uploader(
     "Upload Income CSV",
     type=["csv"],
     help="Preferred columns: Date, Category, Amount",
     key="upload_income"
 )
-
 if uploaded_income is not None:
     try:
         import_inc = pd.read_csv(uploaded_income)
@@ -372,7 +362,6 @@ if uploaded_income is not None:
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("🔍 Filters")
-
 view_mode = st.sidebar.radio(
     "Show",
     options=["Expenses", "Income", "Both"],
@@ -444,7 +433,6 @@ st.markdown(
 
 # Metrics
 col_m1, col_m2, col_m3 = st.columns(3)
-
 total_expense = filtered_expenses["Amount"].sum() if not filtered_expenses.empty else 0.0
 total_income = filtered_income["Amount"].sum() if not filtered_income.empty else 0.0
 net = total_income - total_expense
@@ -456,16 +444,75 @@ with col_m2:
 with col_m3:
     st.metric("Net Balance", f"${net:,.2f}", delta="Surplus" if net >= 0 else "Deficit")
 
+# ======================
+# DOWNLOAD BUTTONS
+# ======================
+st.markdown("### 📥 Download Your Data")
+col_dl1, col_dl2, col_dl3 = st.columns(3)
+
+with col_dl1:
+    if not st.session_state.expenses.empty:
+        csv_exp = st.session_state.expenses.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Download Expenses CSV",
+            data=csv_exp,
+            file_name=f"{safe_user}_expenses.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="download_expenses"
+        )
+    else:
+        st.button("📥 Download Expenses CSV", disabled=True, use_container_width=True)
+
+with col_dl2:
+    if not st.session_state.income.empty:
+        csv_inc = st.session_state.income.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Download Income CSV",
+            data=csv_inc,
+            file_name=f"{safe_user}_income.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="download_income"
+        )
+    else:
+        st.button("📥 Download Income CSV", disabled=True, use_container_width=True)
+
+with col_dl3:
+    # Optional: Download both as a combined CSV (with a Type column)
+    if not st.session_state.expenses.empty or not st.session_state.income.empty:
+        exp = st.session_state.expenses.copy()
+        exp["Type"] = "Expense"
+        exp = exp.rename(columns={"Vendor": "Party"})
+        
+        inc = st.session_state.income.copy()
+        inc["Type"] = "Income"
+        inc = inc.rename(columns={"Customer": "Party"})
+        
+        combined = pd.concat([exp, inc], ignore_index=True)
+        # Reorder columns nicely
+        combined = combined[["Date", "Type", "User", "Category", "Amount", "Party", "Description", "Remark", "Source"]]
+        
+        csv_combined = combined.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Download Combined CSV",
+            data=csv_combined,
+            file_name=f"{safe_user}_expenses_and_income.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="download_combined"
+        )
+    else:
+        st.button("📥 Download Combined CSV", disabled=True, use_container_width=True)
+
 st.markdown("---")
 
 # ======================
 # 📊 CUSTOM CHART BUILDER
 # ======================
 st.subheader("📊 Build Your Own Chart")
-
 with st.expander("Create Custom Chart", expanded=False):
     c1, c2, c3, c4 = st.columns(4)
-
     with c1:
         chart_source = st.selectbox(
             "Data Source",
@@ -490,9 +537,7 @@ with st.expander("Create Custom Chart", expanded=False):
             options=["Sum", "Count", "Average"],
             key="custom_agg"
         )
-
     generate_btn = st.button("🚀 Generate Chart", type="primary", use_container_width=True)
-
     if generate_btn:
         dfs = []
         if chart_source in ["Expenses", "Both"] and not filtered_expenses.empty:
@@ -505,7 +550,6 @@ with st.expander("Create Custom Chart", expanded=False):
             inc["Type"] = "Income"
             inc = inc.rename(columns={"Customer": "Party"})
             dfs.append(inc)
-
         if not dfs:
             st.warning("No data available for the selected source and filters.")
         else:
@@ -513,7 +557,6 @@ with st.expander("Create Custom Chart", expanded=False):
             combined["Amount"] = clean_amount(combined["Amount"])
             combined["Date"] = pd.to_datetime(combined["Date"], errors="coerce")
             combined = combined.dropna(subset=["Date"])
-
             if group_by == "Category":
                 combined["Group"] = combined["Category"].astype(str)
             elif group_by == "Month":
@@ -522,7 +565,6 @@ with st.expander("Create Custom Chart", expanded=False):
                 combined["Group"] = combined["Source"].astype(str)
             else:
                 combined["Group"] = combined["Party"].astype(str)
-
             if agg_method == "Sum":
                 chart_data = combined.groupby("Group")["Amount"].sum().sort_values(ascending=False)
                 ylabel = "Total Amount ($)"
@@ -532,19 +574,17 @@ with st.expander("Create Custom Chart", expanded=False):
             else:
                 chart_data = combined.groupby("Group")["Amount"].mean().sort_values(ascending=False)
                 ylabel = "Average Amount ($)"
-
             if chart_data.empty:
                 st.warning("No data after grouping.")
             else:
                 st.markdown(f"**{chart_type} Chart** — {chart_source} grouped by **{group_by}** ({agg_method})")
-                
+               
                 if chart_type == "Bar":
                     st.bar_chart(chart_data, use_container_width=True)
                 elif chart_type == "Line":
                     st.line_chart(chart_data, use_container_width=True)
                 else:
                     st.area_chart(chart_data, use_container_width=True)
-
                 with st.expander("View Chart Data"):
                     table = chart_data.reset_index()
                     table.columns = [group_by, ylabel]
@@ -559,7 +599,6 @@ st.markdown("---")
 # ======================
 if view_mode in ["Expenses", "Both"]:
     st.subheader("📉 Expenses")
-
     if not filtered_expenses.empty:
         by_category = (
             filtered_expenses.groupby("Category")["Amount"]
@@ -601,7 +640,6 @@ if view_mode in ["Expenses", "Both"]:
 
     st.markdown("---")
     st.subheader("All Expenses (Filtered)")
-
     display_df = filtered_expenses.copy().reset_index(drop=True)
     if "Date" in display_df.columns:
         display_df["Date"] = pd.to_datetime(display_df["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
@@ -612,7 +650,6 @@ if view_mode in ["Expenses", "Both"]:
             display_df[col] = display_df[col].fillna("").astype(str)
     display_df.insert(0, "No.", range(1, len(display_df) + 1))
     display_df.insert(1, "Select", False)
-
     edited_df = st.data_editor(
         display_df,
         num_rows="dynamic",
@@ -637,9 +674,7 @@ if view_mode in ["Expenses", "Both"]:
             "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
         }
     )
-
     col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
-
     with col_save:
         if st.button("💾 Save Changes / Add Rows", type="primary", use_container_width=True, key="save_exp"):
             clean_df = edited_df.drop(columns=["Select", "No."], errors="ignore").copy()
@@ -662,7 +697,6 @@ if view_mode in ["Expenses", "Both"]:
                 st.rerun()
             else:
                 st.warning("Please set Year & Month to **All** before saving.")
-
     with col_del:
         if st.button("🗑️ Delete Selected", use_container_width=True, key="del_exp"):
             selected_mask = edited_df["Select"] == True
@@ -683,11 +717,9 @@ if view_mode in ["Expenses", "Both"]:
                 save_data()
                 st.success(f"Deleted {selected_mask.sum()} expense(s).")
                 st.rerun()
-
     with col_del_all:
         if st.button("💥 Delete All Expenses", use_container_width=True, key="del_all_exp"):
             st.session_state.confirm_delete_all_exp = True
-
     if st.session_state.get("confirm_delete_all_exp", False):
         st.warning("⚠️ Are you sure you want to delete **ALL** expenses?")
         c1, c2, _ = st.columns([1, 1, 3])
@@ -709,7 +741,6 @@ if view_mode in ["Expenses", "Both"]:
 if view_mode in ["Income", "Both"]:
     st.markdown("---")
     st.subheader("📈 Income")
-
     if not filtered_income.empty:
         by_inc_cat = (
             filtered_income.groupby("Category")["Amount"]
@@ -751,7 +782,6 @@ if view_mode in ["Income", "Both"]:
 
     st.markdown("---")
     st.subheader("All Income (Filtered)")
-
     display_inc = filtered_income.copy().reset_index(drop=True)
     if "Date" in display_inc.columns:
         display_inc["Date"] = pd.to_datetime(display_inc["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
@@ -762,7 +792,6 @@ if view_mode in ["Income", "Both"]:
             display_inc[col] = display_inc[col].fillna("").astype(str)
     display_inc.insert(0, "No.", range(1, len(display_inc) + 1))
     display_inc.insert(1, "Select", False)
-
     edited_inc = st.data_editor(
         display_inc,
         num_rows="dynamic",
@@ -787,9 +816,7 @@ if view_mode in ["Income", "Both"]:
             "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
         }
     )
-
     col_save_i, col_del_i, col_del_all_i, _ = st.columns([1, 1, 1, 2])
-
     with col_save_i:
         if st.button("💾 Save Income Changes", type="primary", use_container_width=True, key="save_inc"):
             clean_inc = edited_inc.drop(columns=["Select", "No."], errors="ignore").copy()
@@ -812,7 +839,6 @@ if view_mode in ["Income", "Both"]:
                 st.rerun()
             else:
                 st.warning("Please set Year & Month to **All** before saving.")
-
     with col_del_i:
         if st.button("🗑️ Delete Selected Income", use_container_width=True, key="del_inc"):
             selected_mask = edited_inc["Select"] == True
@@ -833,11 +859,9 @@ if view_mode in ["Income", "Both"]:
                 save_income()
                 st.success(f"Deleted {selected_mask.sum()} income record(s).")
                 st.rerun()
-
     with col_del_all_i:
         if st.button("💥 Delete All Income", use_container_width=True, key="del_all_inc"):
             st.session_state.confirm_delete_all_inc = True
-
     if st.session_state.get("confirm_delete_all_inc", False):
         st.warning("⚠️ Are you sure you want to delete **ALL** income records?")
         c1, c2, _ = st.columns([1, 1, 3])
