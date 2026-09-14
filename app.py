@@ -25,19 +25,15 @@ def clean_amount(series):
     s = s.str.replace(r"[^0-9.\-]", "", regex=True)
     return pd.to_numeric(s, errors="coerce").fillna(0.0)
 
-
 def is_valid_email(email: str) -> bool:
     pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     return bool(re.match(pattern, email.strip()))
 
-
 def sanitize_email(email: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]", "_", email.lower().strip())
 
-
 def generate_verification_code(length=6):
     return "".join(random.choices(string.digits, k=length))
-
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -53,7 +49,6 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         .str.replace(r"[\s\-]+", "_", regex=True)
         .str.replace(r"[^\w]", "", regex=True)
     )
-
     alias_map = {
         # Date
         "date": "Date",
@@ -113,19 +108,16 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         "customer_name": "Customer",
         "client": "Customer",
     }
-
     rename = {}
     for col in df.columns:
         if col in alias_map:
             rename[col] = alias_map[col]
         else:
             rename[col] = col.replace("_", " ").title()
-
     df = df.rename(columns=rename)
     # Drop duplicate columns if multiple aliases mapped to same name
     df = df.loc[:, ~df.columns.duplicated()]
     return df
-
 
 # ======================
 # Session State Init
@@ -169,7 +161,6 @@ if not st.session_state.logged_in:
         st.sidebar.info(f"Code sent to:\n**{st.session_state.pending_email}**")
         st.sidebar.warning(f"🧪 Demo Code: **{st.session_state.verification_code}**")
         st.sidebar.caption("In a real app this code would be sent by email.")
-
         with st.sidebar.form("verify_form"):
             user_code = st.text_input("Enter 6-digit verification code", max_chars=6)
             col1, col2 = st.columns(2)
@@ -179,13 +170,11 @@ if not st.session_state.logged_in:
                 )
             with col2:
                 back_btn = st.form_submit_button("← Back", use_container_width=True)
-
             if back_btn:
                 st.session_state.code_sent = False
                 st.session_state.verification_code = None
                 st.session_state.pending_email = None
                 st.rerun()
-
             if verify_btn:
                 if user_code.strip() == st.session_state.verification_code:
                     st.session_state.logged_in = True
@@ -218,7 +207,6 @@ USER = st.session_state.user_email
 safe_user = sanitize_email(USER)
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
-
 USER_FILE = os.path.join(DATA_DIR, f"{safe_user}_expenses.csv")
 INCOME_FILE = os.path.join(DATA_DIR, f"{safe_user}_income.csv")
 
@@ -234,7 +222,8 @@ INCOME_COLUMNS = [
 # ---- Expenses ----
 if "expenses" not in st.session_state:
     if os.path.exists(USER_FILE):
-        st.session_state.expenses = pd.read_csv(USER_FILE)
+        # FIXED: utf-8-sig supports Chinese + Excel BOM
+        st.session_state.expenses = pd.read_csv(USER_FILE, encoding="utf-8-sig")
         for col in COLUMNS:
             if col not in st.session_state.expenses.columns:
                 st.session_state.expenses[col] = ""
@@ -244,15 +233,15 @@ if "expenses" not in st.session_state:
 
 st.session_state.expenses["Amount"] = clean_amount(st.session_state.expenses["Amount"])
 
-
 def save_data():
-    st.session_state.expenses.to_csv(USER_FILE, index=False)
-
+    # FIXED: write with utf-8-sig so Chinese is preserved and Excel opens correctly
+    st.session_state.expenses.to_csv(USER_FILE, index=False, encoding="utf-8-sig")
 
 # ---- Income ----
 if "income" not in st.session_state:
     if os.path.exists(INCOME_FILE):
-        st.session_state.income = pd.read_csv(INCOME_FILE)
+        # FIXED: utf-8-sig
+        st.session_state.income = pd.read_csv(INCOME_FILE, encoding="utf-8-sig")
         for col in INCOME_COLUMNS:
             if col not in st.session_state.income.columns:
                 st.session_state.income[col] = ""
@@ -262,10 +251,9 @@ if "income" not in st.session_state:
 
 st.session_state.income["Amount"] = clean_amount(st.session_state.income["Amount"])
 
-
 def save_income():
-    st.session_state.income.to_csv(INCOME_FILE, index=False)
-
+    # FIXED: write with utf-8-sig
+    st.session_state.income.to_csv(INCOME_FILE, index=False, encoding="utf-8-sig")
 
 CATEGORIES = [
     "Food & Dining", "Transportation", "Shopping", "Bills & Utilities",
@@ -290,16 +278,16 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
     amount = st.number_input(
         "Amount ($)", min_value=0.0, step=0.01, format="%.2f", key="exp_amt"
     )
+    # Chinese input works here (Simplified / Traditional)
     vendor = st.text_input(
-        "Vendor", placeholder="e.g. Starbucks, Uber, Amazon...", key="exp_vendor"
+        "Vendor", placeholder="e.g. 星巴克, Uber, 淘宝...", key="exp_vendor"
     )
     description = st.text_input(
-        "Description", placeholder="e.g. Lunch, Monthly subscription...", key="exp_desc"
+        "Description", placeholder="e.g. 午餐, 月费订阅...", key="exp_desc"
     )
-    remark = st.text_input("Remark", placeholder="Optional notes...", key="exp_remark")
+    remark = st.text_input("Remark", placeholder="可选备注...", key="exp_remark")
     source = st.selectbox("Source", SOURCES, index=0, key="exp_source")
     submitted = st.form_submit_button("Add Expense", use_container_width=True)
-
     if submitted:
         if amount <= 0:
             st.error("Please enter a valid amount (> 0)")
@@ -334,22 +322,22 @@ with st.sidebar.form("income_form", clear_on_submit=True):
     inc_amount = st.number_input(
         "Amount ($)", min_value=0.0, step=0.01, format="%.2f", key="inc_amt"
     )
+    # Chinese input works here
     inc_customer = st.text_input(
-        "Customer", placeholder="e.g. Client name, Company...", key="inc_customer"
+        "Customer", placeholder="e.g. 客户名称, 公司...", key="inc_customer"
     )
     inc_description = st.text_input(
         "Description",
-        placeholder="e.g. Monthly salary, Project payment...",
+        placeholder="e.g. 月薪, 项目款...",
         key="inc_desc",
     )
     inc_remark = st.text_input(
-        "Remark", placeholder="Optional notes...", key="inc_remark"
+        "Remark", placeholder="可选备注...", key="inc_remark"
     )
     inc_source = st.selectbox("Source", SOURCES, index=0, key="inc_source")
     inc_submitted = st.form_submit_button(
         "Add Income", use_container_width=True, type="primary"
     )
-
     if inc_submitted:
         if inc_amount <= 0:
             st.error("Please enter a valid amount (> 0)")
@@ -373,7 +361,7 @@ with st.sidebar.form("income_form", clear_on_submit=True):
             st.rerun()
 
 # ======================
-# Sidebar - Upload Expenses  (FIXED: Vendor now imports correctly)
+# Sidebar - Upload Expenses  (FIXED: Vendor + Chinese)
 # ======================
 st.sidebar.markdown("---")
 st.sidebar.header("📥 Upload Expenses")
@@ -381,13 +369,12 @@ st.sidebar.header("📥 Upload Expenses")
 uploaded_file = st.sidebar.file_uploader(
     "Upload Expenses CSV",
     type=["csv"],
-    help="Expected: Date, User, Category, Amount, Vendor, Description, Remark, Source. Minimum: Date, Category, Amount.",
+    help="Expected: Date, User, Category, Amount, Vendor, Description, Remark, Source. Minimum: Date, Category, Amount. Supports Chinese text.",
     key="upload_expenses",
 )
-
 if uploaded_file is not None:
     try:
-        # utf-8-sig handles Excel BOM; strip cleans header spaces
+        # FIXED: utf-8-sig handles Chinese + Excel BOM
         import_df = pd.read_csv(uploaded_file, encoding="utf-8-sig")
         import_df.columns = import_df.columns.astype(str).str.strip()
         original_cols = list(import_df.columns)
@@ -424,7 +411,6 @@ if uploaded_file is not None:
             for col, default in defaults.items():
                 if col not in import_df.columns:
                     import_df[col] = default
-
             for col in COLUMNS:
                 if col not in import_df.columns:
                     import_df[col] = defaults.get(col, "-")
@@ -433,7 +419,7 @@ if uploaded_file is not None:
             import_df["Amount"] = clean_amount(import_df["Amount"])
             import_df = import_df[import_df["Amount"] > 0].copy()
 
-            # Clean text columns (keep real Vendor values, only fill empties)
+            # Clean text columns – preserve Chinese characters
             for col in ["User", "Category", "Vendor", "Description", "Remark", "Source", "Date"]:
                 import_df[col] = import_df[col].fillna(defaults.get(col, "-")).astype(str).str.strip()
                 import_df.loc[import_df[col] == "", col] = defaults.get(col, "-")
@@ -441,7 +427,7 @@ if uploaded_file is not None:
                 if col == "Vendor":
                     import_df.loc[import_df[col].str.lower().isin(["nan", "none", "null"]), col] = "-"
 
-            # Preview so user can confirm Vendor is present
+            # Preview so user can confirm Vendor + Chinese is present
             st.sidebar.markdown(f"**Preview** ({len(import_df)} rows)")
             st.sidebar.dataframe(
                 import_df[["Date", "Category", "Amount", "Vendor"]].head(5),
@@ -465,9 +451,8 @@ if uploaded_file is not None:
                 )
                 save_data()
                 added = len(st.session_state.expenses) - before
-                st.sidebar.success(f"✅ Imported {added} expenses (Vendor included)!")
+                st.sidebar.success(f"✅ Imported {added} expenses (Vendor + Chinese included)!")
                 st.rerun()
-
     except Exception as e:
         st.sidebar.error(f"Error reading file: {e}")
 
@@ -480,12 +465,12 @@ st.sidebar.header("📥 Upload Income")
 uploaded_income = st.sidebar.file_uploader(
     "Upload Income CSV",
     type=["csv"],
-    help="Expected: Date, User, Category, Amount, Customer, Description, Remark, Source. Minimum: Date, Category, Amount.",
+    help="Expected: Date, User, Category, Amount, Customer, Description, Remark, Source. Minimum: Date, Category, Amount. Supports Chinese text.",
     key="upload_income",
 )
-
 if uploaded_income is not None:
     try:
+        # FIXED: utf-8-sig
         import_inc = pd.read_csv(uploaded_income, encoding="utf-8-sig")
         import_inc.columns = import_inc.columns.astype(str).str.strip()
         import_inc = normalize_columns(import_inc)
@@ -511,7 +496,6 @@ if uploaded_income is not None:
             for col, default in defaults.items():
                 if col not in import_inc.columns:
                     import_inc[col] = default
-
             for col in INCOME_COLUMNS:
                 if col not in import_inc.columns:
                     import_inc[col] = defaults.get(col, "-")
@@ -548,7 +532,6 @@ if uploaded_income is not None:
                 added = len(st.session_state.income) - before
                 st.sidebar.success(f"Successfully imported {added} income records!")
                 st.rerun()
-
     except Exception as e:
         st.sidebar.error(f"Error reading income file: {e}")
 
@@ -621,7 +604,6 @@ if not filtered_income.empty:
 # ======================
 st.title("💰 Expense Tracker")
 st.markdown(f"Welcome, **{USER}**!")
-
 st.markdown(
     '<p style="color:red; font-weight:bold; font-size:18px;">'
     "⚠️ Do remember to download the file to save your record</p>",
@@ -648,7 +630,8 @@ col_dl1, col_dl2, col_dl3 = st.columns(3)
 
 with col_dl1:
     if not st.session_state.expenses.empty:
-        csv_exp = st.session_state.expenses.to_csv(index=False).encode("utf-8")
+        # FIXED: utf-8-sig so Excel displays Chinese correctly
+        csv_exp = st.session_state.expenses.to_csv(index=False, encoding="utf-8-sig")
         st.download_button(
             label="📥 Download Expenses CSV",
             data=csv_exp,
@@ -662,7 +645,8 @@ with col_dl1:
 
 with col_dl2:
     if not st.session_state.income.empty:
-        csv_inc = st.session_state.income.to_csv(index=False).encode("utf-8")
+        # FIXED: utf-8-sig
+        csv_inc = st.session_state.income.to_csv(index=False, encoding="utf-8-sig")
         st.download_button(
             label="📥 Download Income CSV",
             data=csv_inc,
@@ -679,17 +663,15 @@ with col_dl3:
         exp = st.session_state.expenses.copy()
         exp["Type"] = "Expense"
         exp = exp.rename(columns={"Vendor": "Party"})
-
         inc = st.session_state.income.copy()
         inc["Type"] = "Income"
         inc = inc.rename(columns={"Customer": "Party"})
-
         combined = pd.concat([exp, inc], ignore_index=True)
         combined = combined[
             ["Date", "Type", "User", "Category", "Amount", "Party", "Description", "Remark", "Source"]
         ]
-
-        csv_combined = combined.to_csv(index=False).encode("utf-8")
+        # FIXED: utf-8-sig
+        csv_combined = combined.to_csv(index=False, encoding="utf-8-sig")
         st.download_button(
             label="📥 Download Combined CSV",
             data=csv_combined,
@@ -829,9 +811,9 @@ if view_mode in ["Expenses", "Both"]:
         chart_df = chart_df.dropna(subset=["Date"])
         if selected_year != "All":
             chart_df = chart_df[chart_df["Date"].dt.year == int(selected_year)]
+
         if not chart_df.empty:
             chart_df["YearMonth"] = chart_df["Date"].dt.to_period("M").astype(str)
-
             # Stacked bar: months on X, each Category a different color
             monthly_by_cat = (
                 chart_df.groupby(["YearMonth", "Category"])["Amount"]
@@ -841,7 +823,6 @@ if view_mode in ["Expenses", "Both"]:
             )
             # Keep only categories that have spending
             monthly_by_cat = monthly_by_cat.loc[:, (monthly_by_cat != 0).any(axis=0)]
-
             st.caption("Each color = one expense category")
             st.bar_chart(monthly_by_cat, use_container_width=True)
 
@@ -893,15 +874,14 @@ if view_mode in ["Expenses", "Both"]:
             "Amount": st.column_config.NumberColumn(
                 "Amount ($)", min_value=0.0, format="%,.2f", required=True
             ),
-            "Vendor": st.column_config.TextColumn("Vendor"),
-            "Description": st.column_config.TextColumn("Description"),
-            "Remark": st.column_config.TextColumn("Remark"),
+            "Vendor": st.column_config.TextColumn("Vendor"),          # Chinese OK
+            "Description": st.column_config.TextColumn("Description"), # Chinese OK
+            "Remark": st.column_config.TextColumn("Remark"),           # Chinese OK
             "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
         },
     )
 
     col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
-
     with col_save:
         if st.button(
             "💾 Save Changes / Add Rows",
@@ -918,11 +898,9 @@ if view_mode in ["Expenses", "Both"]:
             clean_df["Source"] = clean_df["Source"].fillna("Manual").astype(str)
             clean_df["Category"] = clean_df["Category"].fillna("").astype(str)
             clean_df["Date"] = clean_df["Date"].fillna("").astype(str)
-
             clean_df = clean_df[
                 (clean_df["Category"].str.strip() != "") & (clean_df["Amount"] > 0)
             ]
-
             if selected_year == "All" and selected_month == "All":
                 st.session_state.expenses = clean_df[COLUMNS].reset_index(drop=True)
                 save_data()
@@ -1008,9 +986,9 @@ if view_mode in ["Income", "Both"]:
         inc_chart = inc_chart.dropna(subset=["Date"])
         if selected_year != "All":
             inc_chart = inc_chart[inc_chart["Date"].dt.year == int(selected_year)]
+
         if not inc_chart.empty:
             inc_chart["YearMonth"] = inc_chart["Date"].dt.to_period("M").astype(str)
-
             monthly_inc_by_cat = (
                 inc_chart.groupby(["YearMonth", "Category"])["Amount"]
                 .sum()
@@ -1018,7 +996,6 @@ if view_mode in ["Income", "Both"]:
                 .sort_index()
             )
             monthly_inc_by_cat = monthly_inc_by_cat.loc[:, (monthly_inc_by_cat != 0).any(axis=0)]
-
             st.caption("Each color = one income category")
             st.bar_chart(monthly_inc_by_cat, use_container_width=True)
 
@@ -1069,15 +1046,14 @@ if view_mode in ["Income", "Both"]:
             "Amount": st.column_config.NumberColumn(
                 "Amount ($)", min_value=0.0, format="%,.2f", required=True
             ),
-            "Customer": st.column_config.TextColumn("Customer"),
-            "Description": st.column_config.TextColumn("Description"),
-            "Remark": st.column_config.TextColumn("Remark"),
+            "Customer": st.column_config.TextColumn("Customer"),       # Chinese OK
+            "Description": st.column_config.TextColumn("Description"), # Chinese OK
+            "Remark": st.column_config.TextColumn("Remark"),           # Chinese OK
             "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
         },
     )
 
     col_save_i, col_del_i, col_del_all_i, _ = st.columns([1, 1, 1, 2])
-
     with col_save_i:
         if st.button(
             "💾 Save Income Changes",
@@ -1094,11 +1070,9 @@ if view_mode in ["Income", "Both"]:
             clean_inc["Source"] = clean_inc["Source"].fillna("Manual").astype(str)
             clean_inc["Category"] = clean_inc["Category"].fillna("").astype(str)
             clean_inc["Date"] = clean_inc["Date"].fillna("").astype(str)
-
             clean_inc = clean_inc[
                 (clean_inc["Category"].str.strip() != "") & (clean_inc["Amount"] > 0)
             ]
-
             if selected_year == "All" and selected_month == "All":
                 st.session_state.income = clean_inc[INCOME_COLUMNS].reset_index(drop=True)
                 save_income()
