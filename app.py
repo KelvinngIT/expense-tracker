@@ -370,3 +370,184 @@ if uploaded_file is not None:
 
             st.sidebar.markdown(f"**Preview** ({len(import_df)} rows)")
             st.sidebar.dataframe(import_df[["Date", "Category", "Amount", "Vendor"]].head(5), use_container_width=True, hide_index=True)
+
+            if st.sidebar.button("Import Expenses", use_container_width=True, type="primary", key="import_exp"):
+                before = len(st.session_state.expenses)
+                st.session_state.expenses = pd.concat([st.session_state.expenses, import_df], ignore_index=True)
+                st.session_state.expenses["Amount"] = clean_amount(st.session_state.expenses["Amount"])
+                save_data()
+                st.sidebar.success(f"✅ Imported {len(st.session_state.expenses) - before} expenses!")
+                st.rerun()
+    except Exception as e:
+        st.sidebar.error(f"Error reading file: {e}")
+
+# ======================
+# Sidebar - Upload Income
+# ======================
+st.sidebar.markdown("---")
+st.sidebar.header("📥 Upload Income")
+
+uploaded_income = st.sidebar.file_uploader(
+    "Upload Income CSV",
+    type=["csv"],
+    help="Supports Simplified & Traditional Chinese. Prefer CSV UTF-8 from Excel.",
+    key="upload_income",
+)
+if uploaded_income is not None:
+    try:
+        import_inc = read_csv_chinese_safe(uploaded_income)
+        import_inc.columns = import_inc.columns.astype(str).str.strip()
+        import_inc = normalize_columns(import_inc)
+
+        if "Vendor" in import_inc.columns and "Customer" not in import_inc.columns:
+            import_inc = import_inc.rename(columns={"Vendor": "Customer"})
+
+        min_required = {"Date", "Category", "Amount"}
+        if not min_required.issubset(set(import_inc.columns)):
+            st.sidebar.error(f"Missing required columns. Found: {', '.join(import_inc.columns)}")
+        else:
+            defaults = {"User": USER, "Customer": "-", "Description": "-", "Remark": "-", "Source": "Import"}
+            for col, default in defaults.items():
+                if col not in import_inc.columns:
+                    import_inc[col] = default
+            for col in INCOME_COLUMNS:
+                if col not in import_inc.columns:
+                    import_inc[col] = defaults.get(col, "-")
+
+            import_inc = import_inc[INCOME_COLUMNS].copy()
+            import_inc["Amount"] = clean_amount(import_inc["Amount"])
+            import_inc = import_inc[import_inc["Amount"] > 0].copy()
+
+            for col in ["User", "Category", "Customer", "Description", "Remark", "Source", "Date"]:
+                import_inc[col] = import_inc[col].fillna(defaults.get(col, "-")).astype(str).str.strip()
+                import_inc.loc[import_inc[col] == "", col] = defaults.get(col, "-")
+
+            st.sidebar.dataframe(import_inc[["Date", "Category", "Amount", "Customer"]].head(3), use_container_width=True, hide_index=True)
+
+            if st.sidebar.button("Import Income", use_container_width=True, type="primary", key="import_inc"):
+                before = len(st.session_state.income)
+                st.session_state.income = pd.concat([st.session_state.income, import_inc], ignore_index=True)
+                st.session_state.income["Amount"] = clean_amount(st.session_state.income["Amount"])
+                save_income()
+                st.sidebar.success(f"Successfully imported {len(st.session_state.income) - before} income records!")
+                st.rerun()
+    except Exception as e:
+        st.sidebar.error(f"Error reading income file: {e}")
+
+# ======================
+# Sidebar - Filters
+# ======================
+st.sidebar.markdown("---")
+st.sidebar.header("🔍 Filters")
+
+view_mode = st.sidebar.radio("Show", options=["Expenses", "Income", "Both"], index=0, horizontal=True, key="view_mode")
+
+all_dates = []
+if not st.session_state.expenses.empty:
+    all_dates.extend(pd.to_datetime(st.session_state.expenses["Date"], errors="coerce").dropna().tolist())
+if not st.session_state.income.empty:
+    all_dates.extend(pd.to_datetime(st.session_state.income["Date"], errors="coerce").dropna().tolist())
+
+if all_dates:
+    all_dates = pd.Series(all_dates)
+    years = sorted(all_dates.dt.year.dropna().astype(int).unique())
+    months = sorted(all_dates.dt.month.dropna().astype(int).unique())
+    month_names = {m: calendar.month_name[m] for m in months}
+    month_options = ["All"] + [month_names[m] for m in months]
+else:
+    years = []
+    month_options = ["All"]
+    month_names = {}
+
+selected_year = st.sidebar.selectbox("Year", options=["All"] + list(years) if years else ["All"])
+selected_month = st.sidebar.selectbox("Month", options=month_options)
+
+# Filter Expenses
+filtered_expenses = st.session_state.expenses.copy()
+if not filtered_expenses.empty:
+    filtered_expenses["Date"] = pd.to_datetime(filtered_expenses["Date"], errors="coerce")
+    filtered_expenses["Year"] = filtered_expenses["Date"].dt.year
+    filtered_expenses["Month"] = filtered_expenses["Date"].dt.month
+    if selected_year != "All":
+        filtered_expenses = filtered_expenses[filtered_expenses["Year"] == int(selected_year)]
+    if selected_month != "All":
+        month_num = [k for k, v in month_names.items() if v == selected_month][0]
+        filtered_expenses = filtered_expenses[filtered_expenses["Month"] == month_num]
+    filtered_expenses["Amount"] = clean_amount(filtered_expenses["Amount"])
+
+# Filter Income
+filtered_income = st.session_state.income.copy()
+if not filtered_income.empty:
+    filtered_income["Date"] = pd.to_datetime(filtered_income["Date"], errors="coerce")
+    filtered_income["Year"] = filtered_income["Date"].dt.year
+    filtered_income["Month"] = filtered_income["Date"].dt.month
+    if selected_year != "All":
+        filtered_income = filtered_income[filtered_income["Year"] == int(selected_year)]
+    if selected_month != "All":
+        month_num = [k for k, v in month_names.items() if v == selected_month][0]
+        filtered_income = filtered_income[filtered_income["Month"] == month_num]
+    filtered_income["Amount"] = clean_amount(filtered_income["Amount"])
+
+# ======================
+# Main Area
+# ======================
+st.title("💰 Expense Tracker")
+st.markdown(f"Welcome, **{USER}**!")
+st.markdown(
+    '<p style="color:red; font-weight:bold; font-size:18px;">'
+    "⚠️ Do remember to download the file to save your record</p>",
+    unsafe_allow_html=True,
+)
+
+col_m1, col_m2, col_m3 = st.columns(3)
+total_expense = filtered_expenses["Amount"].sum() if not filtered_expenses.empty else 0.0
+total_income = filtered_income["Amount"].sum() if not filtered_income.empty else 0.0
+net = total_income - total_expense
+
+with col_m1:
+    st.metric("Total Spent", f"${total_expense:,.2f}")
+with col_m2:
+    st.metric("Total Income", f"${total_income:,.2f}")
+with col_m3:
+    st.metric("Net Balance", f"${net:,.2f}", delta="Surplus" if net >= 0 else "Deficit")
+
+# ======================
+# DOWNLOAD BUTTONS
+# ======================
+st.markdown("### 📥 Download Your Data")
+col_dl1, col_dl2, col_dl3 = st.columns(3)
+
+with col_dl1:
+    if not st.session_state.expenses.empty:
+        csv_exp = st.session_state.expenses.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            label="📥 Download Expenses CSV",
+            data=csv_exp,
+            file_name=f"{safe_user}_expenses.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="download_expenses",
+        )
+    else:
+        st.button("📥 Download Expenses CSV", disabled=True, use_container_width=True)
+
+with col_dl2:
+    if not st.session_state.income.empty:
+        csv_inc = st.session_state.income.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            label="📥 Download Income CSV",
+            data=csv_inc,
+            file_name=f"{safe_user}_income.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="download_income",
+        )
+    else:
+        st.button("📥 Download Income CSV", disabled=True, use_container_width=True)
+
+with col_dl3:
+    if not st.session_state.expenses.empty or not st.session_state.income.empty:
+        exp = st.session_state.expenses.copy()
+        exp["Type"] = "Expense"
+        exp = exp.rename(columns={"Vendor": "Party"})
+        inc
