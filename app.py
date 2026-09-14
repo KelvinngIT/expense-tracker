@@ -35,7 +35,6 @@ def generate_verification_code(length=6):
     return "".join(random.choices(string.digits, k=length))
 
 def read_csv_chinese_safe(filepath_or_buffer):
-    """Try common encodings used by Chinese Excel / Windows systems."""
     encodings = ["utf-8-sig", "utf-8", "gbk", "gb18030", "big5", "cp936"]
     last_error = None
     for enc in encodings:
@@ -49,11 +48,10 @@ def read_csv_chinese_safe(filepath_or_buffer):
     raise ValueError(f"Could not read CSV. Last error: {last_error}")
 
 def has_corrupted_chinese(df: pd.DataFrame, text_cols) -> bool:
-    """Detect if text already contains the replacement character or many ?"""
     for col in text_cols:
         if col in df.columns:
             s = df[col].astype(str)
-            if s.str.contains("�|\?\?\?", regex=True, na=False).any():
+            if s.str.contains(r"�|\?\?\?", regex=True, na=False).any():
                 return True
     return False
 
@@ -84,12 +82,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         "user": "User", "email": "User",
         "customer": "Customer", "customer_name": "Customer", "client": "Customer",
     }
-    rename = {}
-    for col in df.columns:
-        if col in alias_map:
-            rename[col] = alias_map[col]
-        else:
-            rename[col] = col.replace("_", " ").title()
+    rename = {col: alias_map.get(col, col.replace("_", " ").title()) for col in df.columns}
     df = df.rename(columns=rename)
     df = df.loc[:, ~df.columns.duplicated()]
     return df
@@ -232,9 +225,9 @@ st.session_state.income["Amount"] = clean_amount(st.session_state.income["Amount
 def save_income():
     st.session_state.income.to_csv(INCOME_FILE, index=False, encoding="utf-8-sig")
 
-# Warn user if existing data is already corrupted
-if has_corrupted_chinese(st.session_state.expenses, ["Vendor", "Description", "Remark"]) or \
-   has_corrupted_chinese(st.session_state.income, ["Customer", "Description", "Remark"]):
+# Warn about already-corrupted Chinese
+if (has_corrupted_chinese(st.session_state.expenses, ["Vendor", "Description", "Remark"]) or
+    has_corrupted_chinese(st.session_state.income, ["Customer", "Description", "Remark"])):
     st.error(
         "⚠️ Your saved data already contains corrupted Chinese text (????).\n\n"
         "Please delete the files inside the `data` folder and re-enter the Chinese text. "
@@ -369,11 +362,16 @@ if uploaded_file is not None:
                     import_df.loc[import_df[col].str.lower().isin(["nan", "none", "null"]), col] = "-"
 
             st.sidebar.markdown(f"**Preview** ({len(import_df)} rows)")
-            st.sidebar.dataframe(import_df[["Date", "Category", "Amount", "Vendor"]].head(5), use_container_width=True, hide_index=True)
+            st.sidebar.dataframe(
+                import_df[["Date", "Category", "Amount", "Vendor"]].head(5),
+                use_container_width=True, hide_index=True
+            )
 
             if st.sidebar.button("Import Expenses", use_container_width=True, type="primary", key="import_exp"):
                 before = len(st.session_state.expenses)
-                st.session_state.expenses = pd.concat([st.session_state.expenses, import_df], ignore_index=True)
+                st.session_state.expenses = pd.concat(
+                    [st.session_state.expenses, import_df], ignore_index=True
+                )
                 st.session_state.expenses["Amount"] = clean_amount(st.session_state.expenses["Amount"])
                 save_data()
                 st.sidebar.success(f"✅ Imported {len(st.session_state.expenses) - before} expenses!")
@@ -422,11 +420,16 @@ if uploaded_income is not None:
                 import_inc[col] = import_inc[col].fillna(defaults.get(col, "-")).astype(str).str.strip()
                 import_inc.loc[import_inc[col] == "", col] = defaults.get(col, "-")
 
-            st.sidebar.dataframe(import_inc[["Date", "Category", "Amount", "Customer"]].head(3), use_container_width=True, hide_index=True)
+            st.sidebar.dataframe(
+                import_inc[["Date", "Category", "Amount", "Customer"]].head(3),
+                use_container_width=True, hide_index=True
+            )
 
             if st.sidebar.button("Import Income", use_container_width=True, type="primary", key="import_inc"):
                 before = len(st.session_state.income)
-                st.session_state.income = pd.concat([st.session_state.income, import_inc], ignore_index=True)
+                st.session_state.income = pd.concat(
+                    [st.session_state.income, import_inc], ignore_index=True
+                )
                 st.session_state.income["Amount"] = clean_amount(st.session_state.income["Amount"])
                 save_income()
                 st.sidebar.success(f"Successfully imported {len(st.session_state.income) - before} income records!")
@@ -440,7 +443,9 @@ if uploaded_income is not None:
 st.sidebar.markdown("---")
 st.sidebar.header("🔍 Filters")
 
-view_mode = st.sidebar.radio("Show", options=["Expenses", "Income", "Both"], index=0, horizontal=True, key="view_mode")
+view_mode = st.sidebar.radio(
+    "Show", options=["Expenses", "Income", "Both"], index=0, horizontal=True, key="view_mode"
+)
 
 all_dates = []
 if not st.session_state.expenses.empty:
@@ -512,7 +517,7 @@ with col_m3:
     st.metric("Net Balance", f"${net:,.2f}", delta="Surplus" if net >= 0 else "Deficit")
 
 # ======================
-# DOWNLOAD BUTTONS
+# DOWNLOAD BUTTONS  (FIXED – no more NameError on 'inc')
 # ======================
 st.markdown("### 📥 Download Your Data")
 col_dl1, col_dl2, col_dl3 = st.columns(3)
@@ -546,8 +551,408 @@ with col_dl2:
         st.button("📥 Download Income CSV", disabled=True, use_container_width=True)
 
 with col_dl3:
-    if not st.session_state.expenses.empty or not st.session_state.income.empty:
-        exp = st.session_state.expenses.copy()
-        exp["Type"] = "Expense"
-        exp = exp.rename(columns={"Vendor": "Party"})
-        inc
+    # SAFE version – never references undefined variables
+    has_exp = not st.session_state.expenses.empty
+    has_inc = not st.session_state.income.empty
+
+    if has_exp or has_inc:
+        frames = []
+        if has_exp:
+            exp = st.session_state.expenses.copy()
+            exp["Type"] = "Expense"
+            exp = exp.rename(columns={"Vendor": "Party"})
+            frames.append(exp)
+        if has_inc:
+            inc = st.session_state.income.copy()
+            inc["Type"] = "Income"
+            inc = inc.rename(columns={"Customer": "Party"})
+            frames.append(inc)
+
+        combined = pd.concat(frames, ignore_index=True)
+        combined = combined[
+            ["Date", "Type", "User", "Category", "Amount", "Party", "Description", "Remark", "Source"]
+        ]
+        csv_combined = combined.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            label="📥 Download Combined CSV",
+            data=csv_combined,
+            file_name=f"{safe_user}_expenses_and_income.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="download_combined",
+        )
+    else:
+        st.button("📥 Download Combined CSV", disabled=True, use_container_width=True)
+
+st.markdown("---")
+
+# ======================
+# 📊 CUSTOM CHART BUILDER  (also made safe)
+# ======================
+st.subheader("📊 Build Your Own Chart")
+
+with st.expander("Create Custom Chart", expanded=False):
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        chart_source = st.selectbox("Data Source", options=["Expenses", "Income", "Both"], key="custom_source")
+    with c2:
+        chart_type = st.selectbox("Chart Type", options=["Bar", "Line", "Area"], key="custom_type")
+    with c3:
+        group_by = st.selectbox("Group By", options=["Category", "Month", "Source", "Vendor / Customer"], key="custom_group")
+    with c4:
+        agg_method = st.selectbox("Aggregation", options=["Sum", "Count", "Average"], key="custom_agg")
+
+    if st.button("🚀 Generate Chart", type="primary", use_container_width=True):
+        dfs = []
+        if chart_source in ["Expenses", "Both"] and not filtered_expenses.empty:
+            exp = filtered_expenses.copy()
+            exp["Type"] = "Expense"
+            exp = exp.rename(columns={"Vendor": "Party"})
+            dfs.append(exp)
+        if chart_source in ["Income", "Both"] and not filtered_income.empty:
+            inc = filtered_income.copy()
+            inc["Type"] = "Income"
+            inc = inc.rename(columns={"Customer": "Party"})
+            dfs.append(inc)
+
+        if not dfs:
+            st.warning("No data available for the selected source and filters.")
+        else:
+            combined = pd.concat(dfs, ignore_index=True)
+            combined["Amount"] = clean_amount(combined["Amount"])
+            combined["Date"] = pd.to_datetime(combined["Date"], errors="coerce")
+            combined = combined.dropna(subset=["Date"])
+
+            if group_by == "Category":
+                combined["Group"] = combined["Category"].astype(str)
+            elif group_by == "Month":
+                combined["Group"] = combined["Date"].dt.to_period("M").astype(str)
+            elif group_by == "Source":
+                combined["Group"] = combined["Source"].astype(str)
+            else:
+                combined["Group"] = combined["Party"].astype(str)
+
+            if agg_method == "Sum":
+                chart_data = combined.groupby("Group")["Amount"].sum().sort_values(ascending=False)
+                ylabel = "Total Amount ($)"
+            elif agg_method == "Count":
+                chart_data = combined.groupby("Group").size().sort_values(ascending=False)
+                ylabel = "Number of Records"
+            else:
+                chart_data = combined.groupby("Group")["Amount"].mean().sort_values(ascending=False)
+                ylabel = "Average Amount ($)"
+
+            if chart_data.empty:
+                st.warning("No data after grouping.")
+            else:
+                st.markdown(f"**{chart_type} Chart** — {chart_source} grouped by **{group_by}** ({agg_method})")
+                if chart_type == "Bar":
+                    st.bar_chart(chart_data, use_container_width=True)
+                elif chart_type == "Line":
+                    st.line_chart(chart_data, use_container_width=True)
+                else:
+                    st.area_chart(chart_data, use_container_width=True)
+
+                with st.expander("View Chart Data"):
+                    table = chart_data.reset_index()
+                    table.columns = [group_by, ylabel]
+                    if agg_method != "Count":
+                        table[ylabel] = table[ylabel].map(lambda x: f"${x:,.2f}")
+                    st.dataframe(table, use_container_width=True, hide_index=True)
+
+st.markdown("---")
+
+# ======================
+# EXPENSES SECTION
+# ======================
+if view_mode in ["Expenses", "Both"]:
+    st.subheader("📉 Expenses")
+
+    if not filtered_expenses.empty:
+        by_category = filtered_expenses.groupby("Category")["Amount"].sum().sort_values(ascending=False)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Spending by Category**")
+            st.dataframe(
+                by_category.reset_index().rename(columns={"Amount": "Total ($)"}).style.format({"Total ($)": "{:,.2f}"}),
+                use_container_width=True, hide_index=True,
+            )
+        with col2:
+            st.markdown("**Category Chart**")
+            st.bar_chart(by_category)
+    else:
+        st.info("No expenses for the selected filters.")
+
+    st.markdown("### 📅 Monthly Expense Charts (by Category)")
+    if not st.session_state.expenses.empty:
+        chart_df = st.session_state.expenses.copy()
+        chart_df["Amount"] = clean_amount(chart_df["Amount"])
+        chart_df["Date"] = pd.to_datetime(chart_df["Date"], errors="coerce")
+        chart_df = chart_df.dropna(subset=["Date"])
+        if selected_year != "All":
+            chart_df = chart_df[chart_df["Date"].dt.year == int(selected_year)]
+
+        if not chart_df.empty:
+            chart_df["YearMonth"] = chart_df["Date"].dt.to_period("M").astype(str)
+            monthly_by_cat = (
+                chart_df.groupby(["YearMonth", "Category"])["Amount"]
+                .sum().unstack(fill_value=0).sort_index()
+            )
+            monthly_by_cat = monthly_by_cat.loc[:, (monthly_by_cat != 0).any(axis=0)]
+            st.caption("Each color = one expense category")
+            st.bar_chart(monthly_by_cat, use_container_width=True)
+
+            with st.expander("View monthly totals by category"):
+                display_tbl = monthly_by_cat.copy()
+                display_tbl["Total"] = display_tbl.sum(axis=1)
+                st.dataframe(display_tbl.style.format("{:,.2f}"), use_container_width=True)
+        else:
+            st.info("No expense data for charts.")
+    else:
+        st.info("Add some expenses to see monthly charts.")
+
+    st.markdown("---")
+    st.subheader("All Expenses (Filtered)")
+
+    display_df = filtered_expenses.copy().reset_index(drop=True)
+    if "Date" in display_df.columns:
+        display_df["Date"] = (
+            pd.to_datetime(display_df["Date"], errors="coerce")
+            .dt.strftime("%Y-%m-%d").fillna("")
+        )
+    display_df["Amount"] = clean_amount(display_df["Amount"])
+    for col in ["User", "Category", "Vendor", "Description", "Remark", "Source"]:
+        if col in display_df.columns:
+            display_df[col] = display_df[col].fillna("").astype(str)
+
+    display_df.insert(0, "No.", range(1, len(display_df) + 1))
+    display_df.insert(1, "Select", False)
+
+    edited_df = st.data_editor(
+        display_df,
+        num_rows="dynamic",
+        hide_index=True,
+        use_container_width=True,
+        key="expense_editor",
+        column_config={
+            "No.": st.column_config.NumberColumn("No.", width="small", disabled=True),
+            "Select": st.column_config.CheckboxColumn("Select", default=False),
+            "Date": st.column_config.TextColumn("Date"),
+            "User": st.column_config.TextColumn("User"),
+            "Category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True),
+            "Amount": st.column_config.NumberColumn("Amount ($)", min_value=0.0, format="%,.2f", required=True),
+            "Vendor": st.column_config.TextColumn("Vendor"),
+            "Description": st.column_config.TextColumn("Description"),
+            "Remark": st.column_config.TextColumn("Remark"),
+            "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
+        },
+    )
+
+    col_save, col_del, col_del_all, _ = st.columns([1, 1, 1, 2])
+    with col_save:
+        if st.button("💾 Save Changes / Add Rows", type="primary", use_container_width=True, key="save_exp"):
+            clean_df = edited_df.drop(columns=["Select", "No."], errors="ignore").copy()
+            clean_df["Amount"] = clean_amount(clean_df["Amount"])
+            clean_df["User"] = clean_df["User"].fillna(USER).astype(str)
+            clean_df["Vendor"] = clean_df["Vendor"].fillna("-").astype(str)
+            clean_df["Description"] = clean_df["Description"].fillna("-").astype(str)
+            clean_df["Remark"] = clean_df["Remark"].fillna("-").astype(str)
+            clean_df["Source"] = clean_df["Source"].fillna("Manual").astype(str)
+            clean_df["Category"] = clean_df["Category"].fillna("").astype(str)
+            clean_df["Date"] = clean_df["Date"].fillna("").astype(str)
+            clean_df = clean_df[(clean_df["Category"].str.strip() != "") & (clean_df["Amount"] > 0)]
+            if selected_year == "All" and selected_month == "All":
+                st.session_state.expenses = clean_df[COLUMNS].reset_index(drop=True)
+                save_data()
+                st.success("Changes and new rows saved successfully!")
+                st.rerun()
+            else:
+                st.warning("Please set Year & Month to **All** before saving.")
+
+    with col_del:
+        if st.button("🗑️ Delete Selected", use_container_width=True, key="del_exp"):
+            selected_mask = edited_df["Select"] == True
+            if not selected_mask.any():
+                st.warning("Please select at least one row.")
+            else:
+                to_delete = edited_df[selected_mask]
+                original = st.session_state.expenses.copy()
+                for _, row in to_delete.iterrows():
+                    mask = (
+                        (original["Date"].astype(str).str[:10] == str(row["Date"])[:10])
+                        & (original["Category"] == row["Category"])
+                        & (original["Amount"] == float(row["Amount"]))
+                        & (original["Vendor"].astype(str) == str(row["Vendor"]))
+                    )
+                    original = original[~mask]
+                st.session_state.expenses = original.reset_index(drop=True)
+                save_data()
+                st.success(f"Deleted {selected_mask.sum()} expense(s).")
+                st.rerun()
+
+    with col_del_all:
+        if st.button("💥 Delete All Expenses", use_container_width=True, key="del_all_exp"):
+            st.session_state.confirm_delete_all_exp = True
+
+    if st.session_state.get("confirm_delete_all_exp", False):
+        st.warning("⚠️ Are you sure you want to delete **ALL** expenses?")
+        c1, c2, _ = st.columns([1, 1, 3])
+        with c1:
+            if st.button("✅ Yes, Delete Everything", type="primary", key="confirm_del_exp"):
+                st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
+                save_data()
+                st.session_state.confirm_delete_all_exp = False
+                st.success("All expenses deleted.")
+                st.rerun()
+        with c2:
+            if st.button("❌ Cancel", key="cancel_del_exp"):
+                st.session_state.confirm_delete_all_exp = False
+                st.rerun()
+
+# ======================
+# INCOME SECTION
+# ======================
+if view_mode in ["Income", "Both"]:
+    st.markdown("---")
+    st.subheader("📈 Income")
+
+    if not filtered_income.empty:
+        by_inc_cat = filtered_income.groupby("Category")["Amount"].sum().sort_values(ascending=False)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Income by Category**")
+            st.dataframe(
+                by_inc_cat.reset_index().rename(columns={"Amount": "Total ($)"}).style.format({"Total ($)": "{:,.2f}"}),
+                use_container_width=True, hide_index=True,
+            )
+        with col2:
+            st.markdown("**Income Category Chart**")
+            st.bar_chart(by_inc_cat)
+    else:
+        st.info("No income records for the selected filters.")
+
+    st.markdown("### 📅 Monthly Income Charts (by Category)")
+    if not st.session_state.income.empty:
+        inc_chart = st.session_state.income.copy()
+        inc_chart["Amount"] = clean_amount(inc_chart["Amount"])
+        inc_chart["Date"] = pd.to_datetime(inc_chart["Date"], errors="coerce")
+        inc_chart = inc_chart.dropna(subset=["Date"])
+        if selected_year != "All":
+            inc_chart = inc_chart[inc_chart["Date"].dt.year == int(selected_year)]
+
+        if not inc_chart.empty:
+            inc_chart["YearMonth"] = inc_chart["Date"].dt.to_period("M").astype(str)
+            monthly_inc_by_cat = (
+                inc_chart.groupby(["YearMonth", "Category"])["Amount"]
+                .sum().unstack(fill_value=0).sort_index()
+            )
+            monthly_inc_by_cat = monthly_inc_by_cat.loc[:, (monthly_inc_by_cat != 0).any(axis=0)]
+            st.caption("Each color = one income category")
+            st.bar_chart(monthly_inc_by_cat, use_container_width=True)
+
+            with st.expander("View monthly income by category"):
+                display_tbl = monthly_inc_by_cat.copy()
+                display_tbl["Total"] = display_tbl.sum(axis=1)
+                st.dataframe(display_tbl.style.format("{:,.2f}"), use_container_width=True)
+        else:
+            st.info("No income data for charts.")
+    else:
+        st.info("Add some income to see monthly charts.")
+
+    st.markdown("---")
+    st.subheader("All Income (Filtered)")
+
+    display_inc = filtered_income.copy().reset_index(drop=True)
+    if "Date" in display_inc.columns:
+        display_inc["Date"] = (
+            pd.to_datetime(display_inc["Date"], errors="coerce")
+            .dt.strftime("%Y-%m-%d").fillna("")
+        )
+    display_inc["Amount"] = clean_amount(display_inc["Amount"])
+    for col in ["User", "Category", "Customer", "Description", "Remark", "Source"]:
+        if col in display_inc.columns:
+            display_inc[col] = display_inc[col].fillna("").astype(str)
+
+    display_inc.insert(0, "No.", range(1, len(display_inc) + 1))
+    display_inc.insert(1, "Select", False)
+
+    edited_inc = st.data_editor(
+        display_inc,
+        num_rows="dynamic",
+        hide_index=True,
+        use_container_width=True,
+        key="income_editor",
+        column_config={
+            "No.": st.column_config.NumberColumn("No.", width="small", disabled=True),
+            "Select": st.column_config.CheckboxColumn("Select", default=False),
+            "Date": st.column_config.TextColumn("Date"),
+            "User": st.column_config.TextColumn("User"),
+            "Category": st.column_config.SelectboxColumn("Category", options=INCOME_CATEGORIES, required=True),
+            "Amount": st.column_config.NumberColumn("Amount ($)", min_value=0.0, format="%,.2f", required=True),
+            "Customer": st.column_config.TextColumn("Customer"),
+            "Description": st.column_config.TextColumn("Description"),
+            "Remark": st.column_config.TextColumn("Remark"),
+            "Source": st.column_config.SelectboxColumn("Source", options=SOURCES),
+        },
+    )
+
+    col_save_i, col_del_i, col_del_all_i, _ = st.columns([1, 1, 1, 2])
+    with col_save_i:
+        if st.button("💾 Save Income Changes", type="primary", use_container_width=True, key="save_inc"):
+            clean_inc = edited_inc.drop(columns=["Select", "No."], errors="ignore").copy()
+            clean_inc["Amount"] = clean_amount(clean_inc["Amount"])
+            clean_inc["User"] = clean_inc["User"].fillna(USER).astype(str)
+            clean_inc["Customer"] = clean_inc["Customer"].fillna("-").astype(str)
+            clean_inc["Description"] = clean_inc["Description"].fillna("-").astype(str)
+            clean_inc["Remark"] = clean_inc["Remark"].fillna("-").astype(str)
+            clean_inc["Source"] = clean_inc["Source"].fillna("Manual").astype(str)
+            clean_inc["Category"] = clean_inc["Category"].fillna("").astype(str)
+            clean_inc["Date"] = clean_inc["Date"].fillna("").astype(str)
+            clean_inc = clean_inc[(clean_inc["Category"].str.strip() != "") & (clean_inc["Amount"] > 0)]
+            if selected_year == "All" and selected_month == "All":
+                st.session_state.income = clean_inc[INCOME_COLUMNS].reset_index(drop=True)
+                save_income()
+                st.success("Income changes saved!")
+                st.rerun()
+            else:
+                st.warning("Please set Year & Month to **All** before saving.")
+
+    with col_del_i:
+        if st.button("🗑️ Delete Selected Income", use_container_width=True, key="del_inc"):
+            selected_mask = edited_inc["Select"] == True
+            if not selected_mask.any():
+                st.warning("Please select at least one row.")
+            else:
+                to_delete = edited_inc[selected_mask]
+                original = st.session_state.income.copy()
+                for _, row in to_delete.iterrows():
+                    mask = (
+                        (original["Date"].astype(str).str[:10] == str(row["Date"])[:10])
+                        & (original["Category"] == row["Category"])
+                        & (original["Amount"] == float(row["Amount"]))
+                        & (original["Customer"].astype(str) == str(row["Customer"]))
+                    )
+                    original = original[~mask]
+                st.session_state.income = original.reset_index(drop=True)
+                save_income()
+                st.success(f"Deleted {selected_mask.sum()} income record(s).")
+                st.rerun()
+
+    with col_del_all_i:
+        if st.button("💥 Delete All Income", use_container_width=True, key="del_all_inc"):
+            st.session_state.confirm_delete_all_inc = True
+
+    if st.session_state.get("confirm_delete_all_inc", False):
+        st.warning("⚠️ Are you sure you want to delete **ALL** income records?")
+        c1, c2, _ = st.columns([1, 1, 3])
+        with c1:
+            if st.button("✅ Yes, Delete All Income", type="primary", key="confirm_del_inc"):
+                st.session_state.income = pd.DataFrame(columns=INCOME_COLUMNS)
+                save_income()
+                st.session_state.confirm_delete_all_inc = False
+                st.success("All income records deleted.")
+                st.rerun()
+        with c2:
+            if st.button("❌ Cancel", key="cancel_del_inc"):
+                st.session_state.confirm_delete_all_inc = False
+                st.rerun()
