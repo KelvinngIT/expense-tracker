@@ -234,15 +234,21 @@ if (has_corrupted_chinese(st.session_state.expenses, ["Vendor", "Description", "
         "New entries will work correctly."
     )
 
+# ======================
+# Categories (UPDATED)
+# ======================
 CATEGORIES = [
     "Food & Dining", "Transportation", "Shopping", "Bills & Utilities",
     "Entertainment", "Health", "Education", "Travel",
-    "Type", "Family Support", "Assets", "Other"
+    "Type", "Family Support", "Assets", "Other",
+    "Health care", "Property", "Red pocket", "Transfer"
 ]
+
 INCOME_CATEGORIES = [
     "Salary", "Freelance", "Business", "Investment",
-    "Gift", "Refund", "Rental", "Other"
+    "Gift", "Refund", "Rental", "Other", "Stock"
 ]
+
 SOURCES = ["Manual", "Bank", "Credit Card", "Cash", "Import", "Other"]
 
 # ======================
@@ -329,13 +335,13 @@ uploaded_file = st.sidebar.file_uploader(
     help="Supports Simplified & Traditional Chinese. Prefer CSV UTF-8 from Excel.",
     key="upload_expenses",
 )
+
 if uploaded_file is not None:
     try:
         import_df = read_csv_chinese_safe(uploaded_file)
         import_df.columns = import_df.columns.astype(str).str.strip()
         original_cols = list(import_df.columns)
         import_df = normalize_columns(import_df)
-
         min_required = {"Date", "Category", "Amount"}
         if not min_required.issubset(set(import_df.columns)):
             st.sidebar.error(
@@ -350,23 +356,19 @@ if uploaded_file is not None:
             for col in COLUMNS:
                 if col not in import_df.columns:
                     import_df[col] = defaults.get(col, "-")
-
             import_df = import_df[COLUMNS].copy()
             import_df["Amount"] = clean_amount(import_df["Amount"])
             import_df = import_df[import_df["Amount"] > 0].copy()
-
             for col in ["User", "Category", "Vendor", "Description", "Remark", "Source", "Date"]:
                 import_df[col] = import_df[col].fillna(defaults.get(col, "-")).astype(str).str.strip()
                 import_df.loc[import_df[col] == "", col] = defaults.get(col, "-")
                 if col == "Vendor":
                     import_df.loc[import_df[col].str.lower().isin(["nan", "none", "null"]), col] = "-"
-
             st.sidebar.markdown(f"**Preview** ({len(import_df)} rows)")
             st.sidebar.dataframe(
                 import_df[["Date", "Category", "Amount", "Vendor"]].head(5),
                 use_container_width=True, hide_index=True
             )
-
             if st.sidebar.button("Import Expenses", use_container_width=True, type="primary", key="import_exp"):
                 before = len(st.session_state.expenses)
                 st.session_state.expenses = pd.concat(
@@ -391,15 +393,14 @@ uploaded_income = st.sidebar.file_uploader(
     help="Supports Simplified & Traditional Chinese. Prefer CSV UTF-8 from Excel.",
     key="upload_income",
 )
+
 if uploaded_income is not None:
     try:
         import_inc = read_csv_chinese_safe(uploaded_income)
         import_inc.columns = import_inc.columns.astype(str).str.strip()
         import_inc = normalize_columns(import_inc)
-
         if "Vendor" in import_inc.columns and "Customer" not in import_inc.columns:
             import_inc = import_inc.rename(columns={"Vendor": "Customer"})
-
         min_required = {"Date", "Category", "Amount"}
         if not min_required.issubset(set(import_inc.columns)):
             st.sidebar.error(f"Missing required columns. Found: {', '.join(import_inc.columns)}")
@@ -411,20 +412,16 @@ if uploaded_income is not None:
             for col in INCOME_COLUMNS:
                 if col not in import_inc.columns:
                     import_inc[col] = defaults.get(col, "-")
-
             import_inc = import_inc[INCOME_COLUMNS].copy()
             import_inc["Amount"] = clean_amount(import_inc["Amount"])
             import_inc = import_inc[import_inc["Amount"] > 0].copy()
-
             for col in ["User", "Category", "Customer", "Description", "Remark", "Source", "Date"]:
                 import_inc[col] = import_inc[col].fillna(defaults.get(col, "-")).astype(str).str.strip()
                 import_inc.loc[import_inc[col] == "", col] = defaults.get(col, "-")
-
             st.sidebar.dataframe(
                 import_inc[["Date", "Category", "Amount", "Customer"]].head(3),
                 use_container_width=True, hide_index=True
             )
-
             if st.sidebar.button("Import Income", use_container_width=True, type="primary", key="import_inc"):
                 before = len(st.session_state.income)
                 st.session_state.income = pd.concat(
@@ -517,7 +514,7 @@ with col_m3:
     st.metric("Net Balance", f"${net:,.2f}", delta="Surplus" if net >= 0 else "Deficit")
 
 # ======================
-# DOWNLOAD BUTTONS  (FIXED – no more NameError on 'inc')
+# DOWNLOAD BUTTONS
 # ======================
 st.markdown("### 📥 Download Your Data")
 col_dl1, col_dl2, col_dl3 = st.columns(3)
@@ -551,10 +548,8 @@ with col_dl2:
         st.button("📥 Download Income CSV", disabled=True, use_container_width=True)
 
 with col_dl3:
-    # SAFE version – never references undefined variables
     has_exp = not st.session_state.expenses.empty
     has_inc = not st.session_state.income.empty
-
     if has_exp or has_inc:
         frames = []
         if has_exp:
@@ -567,7 +562,6 @@ with col_dl3:
             inc["Type"] = "Income"
             inc = inc.rename(columns={"Customer": "Party"})
             frames.append(inc)
-
         combined = pd.concat(frames, ignore_index=True)
         combined = combined[
             ["Date", "Type", "User", "Category", "Amount", "Party", "Description", "Remark", "Source"]
@@ -587,10 +581,9 @@ with col_dl3:
 st.markdown("---")
 
 # ======================
-# 📊 CUSTOM CHART BUILDER  (also made safe)
+# 📊 CUSTOM CHART BUILDER
 # ======================
 st.subheader("📊 Build Your Own Chart")
-
 with st.expander("Create Custom Chart", expanded=False):
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -667,7 +660,6 @@ st.markdown("---")
 # ======================
 if view_mode in ["Expenses", "Both"]:
     st.subheader("📉 Expenses")
-
     if not filtered_expenses.empty:
         by_category = filtered_expenses.groupby("Category")["Amount"].sum().sort_values(ascending=False)
         col1, col2 = st.columns(2)
@@ -691,7 +683,6 @@ if view_mode in ["Expenses", "Both"]:
         chart_df = chart_df.dropna(subset=["Date"])
         if selected_year != "All":
             chart_df = chart_df[chart_df["Date"].dt.year == int(selected_year)]
-
         if not chart_df.empty:
             chart_df["YearMonth"] = chart_df["Date"].dt.to_period("M").astype(str)
             monthly_by_cat = (
@@ -701,7 +692,6 @@ if view_mode in ["Expenses", "Both"]:
             monthly_by_cat = monthly_by_cat.loc[:, (monthly_by_cat != 0).any(axis=0)]
             st.caption("Each color = one expense category")
             st.bar_chart(monthly_by_cat, use_container_width=True)
-
             with st.expander("View monthly totals by category"):
                 display_tbl = monthly_by_cat.copy()
                 display_tbl["Total"] = display_tbl.sum(axis=1)
@@ -713,7 +703,6 @@ if view_mode in ["Expenses", "Both"]:
 
     st.markdown("---")
     st.subheader("All Expenses (Filtered)")
-
     display_df = filtered_expenses.copy().reset_index(drop=True)
     if "Date" in display_df.columns:
         display_df["Date"] = (
@@ -815,7 +804,6 @@ if view_mode in ["Expenses", "Both"]:
 if view_mode in ["Income", "Both"]:
     st.markdown("---")
     st.subheader("📈 Income")
-
     if not filtered_income.empty:
         by_inc_cat = filtered_income.groupby("Category")["Amount"].sum().sort_values(ascending=False)
         col1, col2 = st.columns(2)
@@ -839,7 +827,6 @@ if view_mode in ["Income", "Both"]:
         inc_chart = inc_chart.dropna(subset=["Date"])
         if selected_year != "All":
             inc_chart = inc_chart[inc_chart["Date"].dt.year == int(selected_year)]
-
         if not inc_chart.empty:
             inc_chart["YearMonth"] = inc_chart["Date"].dt.to_period("M").astype(str)
             monthly_inc_by_cat = (
@@ -849,7 +836,6 @@ if view_mode in ["Income", "Both"]:
             monthly_inc_by_cat = monthly_inc_by_cat.loc[:, (monthly_inc_by_cat != 0).any(axis=0)]
             st.caption("Each color = one income category")
             st.bar_chart(monthly_inc_by_cat, use_container_width=True)
-
             with st.expander("View monthly income by category"):
                 display_tbl = monthly_inc_by_cat.copy()
                 display_tbl["Total"] = display_tbl.sum(axis=1)
@@ -861,7 +847,6 @@ if view_mode in ["Income", "Both"]:
 
     st.markdown("---")
     st.subheader("All Income (Filtered)")
-
     display_inc = filtered_income.copy().reset_index(drop=True)
     if "Date" in display_inc.columns:
         display_inc["Date"] = (
