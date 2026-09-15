@@ -71,6 +71,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         "expense_type": "Category", "account": "Category",
         "amount": "Amount", "value": "Amount", "price": "Amount",
         "cost": "Amount", "total": "Amount", "debit": "Amount",
+        "currency": "Currency", "curr": "Currency", "ccy": "Currency",
         "vendor": "Vendor", "vendor_name": "Vendor", "payee": "Vendor",
         "merchant": "Vendor", "supplier": "Vendor", "store": "Vendor",
         "company": "Vendor", "business": "Vendor", "name": "Vendor", "party": "Vendor",
@@ -175,17 +176,21 @@ USER = st.session_state.user_email
 safe_user = sanitize_email(USER)
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
+
 USER_FILE = os.path.join(DATA_DIR, f"{safe_user}_expenses.csv")
 INCOME_FILE = os.path.join(DATA_DIR, f"{safe_user}_income.csv")
 
 COLUMNS = [
-    "Date", "User", "Category", "Amount",
+    "Date", "User", "Category", "Amount", "Currency",
     "Vendor", "Description", "Remark", "Source"
 ]
+
 INCOME_COLUMNS = [
-    "Date", "User", "Category", "Amount",
+    "Date", "User", "Category", "Amount", "Currency",
     "Customer", "Description", "Remark", "Source"
 ]
+
+CURRENCIES = ["HKD", "USD", "CNY", "EUR", "GBP", "JPY", "SGD", "Other"]
 
 # ---- Expenses ----
 if "expenses" not in st.session_state:
@@ -194,7 +199,7 @@ if "expenses" not in st.session_state:
             st.session_state.expenses = read_csv_chinese_safe(USER_FILE)
             for col in COLUMNS:
                 if col not in st.session_state.expenses.columns:
-                    st.session_state.expenses[col] = ""
+                    st.session_state.expenses[col] = "HKD" if col == "Currency" else ""
             st.session_state.expenses = st.session_state.expenses[COLUMNS]
         except Exception:
             st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
@@ -202,6 +207,8 @@ if "expenses" not in st.session_state:
         st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
 
 st.session_state.expenses["Amount"] = clean_amount(st.session_state.expenses["Amount"])
+if "Currency" in st.session_state.expenses.columns:
+    st.session_state.expenses["Currency"] = st.session_state.expenses["Currency"].fillna("HKD").astype(str)
 
 def save_data():
     st.session_state.expenses.to_csv(USER_FILE, index=False, encoding="utf-8-sig")
@@ -213,7 +220,7 @@ if "income" not in st.session_state:
             st.session_state.income = read_csv_chinese_safe(INCOME_FILE)
             for col in INCOME_COLUMNS:
                 if col not in st.session_state.income.columns:
-                    st.session_state.income[col] = ""
+                    st.session_state.income[col] = "HKD" if col == "Currency" else ""
             st.session_state.income = st.session_state.income[INCOME_COLUMNS]
         except Exception:
             st.session_state.income = pd.DataFrame(columns=INCOME_COLUMNS)
@@ -221,6 +228,8 @@ if "income" not in st.session_state:
         st.session_state.income = pd.DataFrame(columns=INCOME_COLUMNS)
 
 st.session_state.income["Amount"] = clean_amount(st.session_state.income["Amount"])
+if "Currency" in st.session_state.income.columns:
+    st.session_state.income["Currency"] = st.session_state.income["Currency"].fillna("HKD").astype(str)
 
 def save_income():
     st.session_state.income.to_csv(INCOME_FILE, index=False, encoding="utf-8-sig")
@@ -240,8 +249,8 @@ if (has_corrupted_chinese(st.session_state.expenses, ["Vendor", "Description", "
 CATEGORIES = [
     "Food & Dining", "Transportation", "Shopping", "Bills & Utilities",
     "Entertainment", "Health", "Education", "Travel",
-    "Type", "Family Support", "Health care", "Red pocket","Assets", "Finance",
-    "Property", "Transfer","Other",
+    "Type", "Family Support", "Health care", "Red pocket", "Assets", "Finance",
+    "Property", "Transfer", "Other",
 ]
 
 INCOME_CATEGORIES = [
@@ -260,12 +269,14 @@ st.sidebar.header("➕ Add New Expense")
 with st.sidebar.form("expense_form", clear_on_submit=True):
     date = st.date_input("Date", value=datetime.now(), key="exp_date")
     category = st.selectbox("Category", CATEGORIES, key="exp_cat")
-    amount = st.number_input("Amount ($)", min_value=0.0, step=0.01, format="%.2f", key="exp_amt")
+    amount = st.number_input("Amount", min_value=0.0, step=0.01, format="%.2f", key="exp_amt")
+    currency = st.selectbox("Currency", CURRENCIES, index=0, key="exp_currency")
     vendor = st.text_input("Vendor", placeholder="星巴克 / 星巴克, Uber, 淘宝...", key="exp_vendor")
     description = st.text_input("Description", placeholder="午餐 / 午餐, 月费...", key="exp_desc")
     remark = st.text_input("Remark", placeholder="可选备注...", key="exp_remark")
     source = st.selectbox("Source", SOURCES, index=0, key="exp_source")
     submitted = st.form_submit_button("Add Expense", use_container_width=True)
+
     if submitted:
         if amount <= 0:
             st.error("Please enter a valid amount (> 0)")
@@ -275,6 +286,7 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
                 "User": USER,
                 "Category": category,
                 "Amount": float(amount),
+                "Currency": currency,
                 "Vendor": vendor.strip() if vendor else "-",
                 "Description": description.strip() if description else "-",
                 "Remark": remark.strip() if remark else "-",
@@ -284,7 +296,7 @@ with st.sidebar.form("expense_form", clear_on_submit=True):
                 [st.session_state.expenses, pd.DataFrame([new_row])], ignore_index=True
             )
             save_data()
-            st.success(f"Added: {category} - ${amount:,.2f}")
+            st.success(f"Added: {category} - {currency} {amount:,.2f}")
             st.rerun()
 
 # ======================
@@ -296,12 +308,14 @@ st.sidebar.header("💵 Add New Income")
 with st.sidebar.form("income_form", clear_on_submit=True):
     inc_date = st.date_input("Date", value=datetime.now(), key="inc_date")
     inc_category = st.selectbox("Category", INCOME_CATEGORIES, key="inc_cat")
-    inc_amount = st.number_input("Amount ($)", min_value=0.0, step=0.01, format="%.2f", key="inc_amt")
+    inc_amount = st.number_input("Amount", min_value=0.0, step=0.01, format="%.2f", key="inc_amt")
+    inc_currency = st.selectbox("Currency", CURRENCIES, index=0, key="inc_currency")
     inc_customer = st.text_input("Customer", placeholder="客户名称 / 客戶名稱...", key="inc_customer")
     inc_description = st.text_input("Description", placeholder="月薪 / 项目款...", key="inc_desc")
     inc_remark = st.text_input("Remark", placeholder="可选备注...", key="inc_remark")
     inc_source = st.selectbox("Source", SOURCES, index=0, key="inc_source")
     inc_submitted = st.form_submit_button("Add Income", use_container_width=True, type="primary")
+
     if inc_submitted:
         if inc_amount <= 0:
             st.error("Please enter a valid amount (> 0)")
@@ -311,6 +325,7 @@ with st.sidebar.form("income_form", clear_on_submit=True):
                 "User": USER,
                 "Category": inc_category,
                 "Amount": float(inc_amount),
+                "Currency": inc_currency,
                 "Customer": inc_customer.strip() if inc_customer else "-",
                 "Description": inc_description.strip() if inc_description else "-",
                 "Remark": inc_remark.strip() if inc_remark else "-",
@@ -320,7 +335,7 @@ with st.sidebar.form("income_form", clear_on_submit=True):
                 [st.session_state.income, pd.DataFrame([new_inc])], ignore_index=True
             )
             save_income()
-            st.success(f"Income added: {inc_category} - ${inc_amount:,.2f}")
+            st.success(f"Income added: {inc_category} - {inc_currency} {inc_amount:,.2f}")
             st.rerun()
 
 # ======================
@@ -342,6 +357,7 @@ if uploaded_file is not None:
         import_df.columns = import_df.columns.astype(str).str.strip()
         original_cols = list(import_df.columns)
         import_df = normalize_columns(import_df)
+
         min_required = {"Date", "Category", "Amount"}
         if not min_required.issubset(set(import_df.columns)):
             st.sidebar.error(
@@ -349,26 +365,38 @@ if uploaded_file is not None:
                 f"Found: {', '.join(original_cols)}"
             )
         else:
-            defaults = {"User": USER, "Vendor": "-", "Description": "-", "Remark": "-", "Source": "Import"}
+            defaults = {
+                "User": USER,
+                "Currency": "HKD",
+                "Vendor": "-",
+                "Description": "-",
+                "Remark": "-",
+                "Source": "Import"
+            }
             for col, default in defaults.items():
                 if col not in import_df.columns:
                     import_df[col] = default
+
             for col in COLUMNS:
                 if col not in import_df.columns:
                     import_df[col] = defaults.get(col, "-")
+
             import_df = import_df[COLUMNS].copy()
             import_df["Amount"] = clean_amount(import_df["Amount"])
             import_df = import_df[import_df["Amount"] > 0].copy()
-            for col in ["User", "Category", "Vendor", "Description", "Remark", "Source", "Date"]:
+
+            for col in ["User", "Category", "Currency", "Vendor", "Description", "Remark", "Source", "Date"]:
                 import_df[col] = import_df[col].fillna(defaults.get(col, "-")).astype(str).str.strip()
                 import_df.loc[import_df[col] == "", col] = defaults.get(col, "-")
                 if col == "Vendor":
                     import_df.loc[import_df[col].str.lower().isin(["nan", "none", "null"]), col] = "-"
+
             st.sidebar.markdown(f"**Preview** ({len(import_df)} rows)")
             st.sidebar.dataframe(
-                import_df[["Date", "Category", "Amount", "Vendor"]].head(5),
+                import_df[["Date", "Category", "Amount", "Currency", "Vendor"]].head(5),
                 use_container_width=True, hide_index=True
             )
+
             if st.sidebar.button("Import Expenses", use_container_width=True, type="primary", key="import_exp"):
                 before = len(st.session_state.expenses)
                 st.session_state.expenses = pd.concat(
@@ -399,29 +427,43 @@ if uploaded_income is not None:
         import_inc = read_csv_chinese_safe(uploaded_income)
         import_inc.columns = import_inc.columns.astype(str).str.strip()
         import_inc = normalize_columns(import_inc)
+
         if "Vendor" in import_inc.columns and "Customer" not in import_inc.columns:
             import_inc = import_inc.rename(columns={"Vendor": "Customer"})
+
         min_required = {"Date", "Category", "Amount"}
         if not min_required.issubset(set(import_inc.columns)):
             st.sidebar.error(f"Missing required columns. Found: {', '.join(import_inc.columns)}")
         else:
-            defaults = {"User": USER, "Customer": "-", "Description": "-", "Remark": "-", "Source": "Import"}
+            defaults = {
+                "User": USER,
+                "Currency": "HKD",
+                "Customer": "-",
+                "Description": "-",
+                "Remark": "-",
+                "Source": "Import"
+            }
             for col, default in defaults.items():
                 if col not in import_inc.columns:
                     import_inc[col] = default
+
             for col in INCOME_COLUMNS:
                 if col not in import_inc.columns:
                     import_inc[col] = defaults.get(col, "-")
+
             import_inc = import_inc[INCOME_COLUMNS].copy()
             import_inc["Amount"] = clean_amount(import_inc["Amount"])
             import_inc = import_inc[import_inc["Amount"] > 0].copy()
-            for col in ["User", "Category", "Customer", "Description", "Remark", "Source", "Date"]:
+
+            for col in ["User", "Category", "Currency", "Customer", "Description", "Remark", "Source", "Date"]:
                 import_inc[col] = import_inc[col].fillna(defaults.get(col, "-")).astype(str).str.strip()
                 import_inc.loc[import_inc[col] == "", col] = defaults.get(col, "-")
+
             st.sidebar.dataframe(
-                import_inc[["Date", "Category", "Amount", "Customer"]].head(3),
+                import_inc[["Date", "Category", "Amount", "Currency", "Customer"]].head(3),
                 use_container_width=True, hide_index=True
             )
+
             if st.sidebar.button("Import Income", use_container_width=True, type="primary", key="import_inc"):
                 before = len(st.session_state.income)
                 st.session_state.income = pd.concat(
@@ -495,6 +537,7 @@ if not filtered_income.empty:
 # ======================
 st.title("💰 Expense Tracker")
 st.markdown(f"Welcome, **{USER}**!")
+
 st.markdown(
     '<p style="color:red; font-weight:bold; font-size:18px;">'
     "⚠️ Do remember to download the file to save your record</p>",
@@ -507,11 +550,11 @@ total_income = filtered_income["Amount"].sum() if not filtered_income.empty else
 net = total_income - total_expense
 
 with col_m1:
-    st.metric("Total Spent", f"${total_expense:,.2f}")
+    st.metric("Total Spent", f"{total_expense:,.2f}")
 with col_m2:
-    st.metric("Total Income", f"${total_income:,.2f}")
+    st.metric("Total Income", f"{total_income:,.2f}")
 with col_m3:
-    st.metric("Net Balance", f"${net:,.2f}", delta="Surplus" if net >= 0 else "Deficit")
+    st.metric("Net Balance", f"{net:,.2f}", delta="Surplus" if net >= 0 else "Deficit")
 
 # ======================
 # DOWNLOAD BUTTONS
@@ -564,7 +607,7 @@ with col_dl3:
             frames.append(inc)
         combined = pd.concat(frames, ignore_index=True)
         combined = combined[
-            ["Date", "Type", "User", "Category", "Amount", "Party", "Description", "Remark", "Source"]
+            ["Date", "Type", "User", "Category", "Amount", "Currency", "Party", "Description", "Remark", "Source"]
         ]
         csv_combined = combined.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
@@ -584,6 +627,7 @@ st.markdown("---")
 # 📊 CUSTOM CHART BUILDER
 # ======================
 st.subheader("📊 Build Your Own Chart")
+
 with st.expander("Create Custom Chart", expanded=False):
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -627,13 +671,13 @@ with st.expander("Create Custom Chart", expanded=False):
 
             if agg_method == "Sum":
                 chart_data = combined.groupby("Group")["Amount"].sum().sort_values(ascending=False)
-                ylabel = "Total Amount ($)"
+                ylabel = "Total Amount"
             elif agg_method == "Count":
                 chart_data = combined.groupby("Group").size().sort_values(ascending=False)
                 ylabel = "Number of Records"
             else:
                 chart_data = combined.groupby("Group")["Amount"].mean().sort_values(ascending=False)
-                ylabel = "Average Amount ($)"
+                ylabel = "Average Amount"
 
             if chart_data.empty:
                 st.warning("No data after grouping.")
@@ -650,7 +694,7 @@ with st.expander("Create Custom Chart", expanded=False):
                     table = chart_data.reset_index()
                     table.columns = [group_by, ylabel]
                     if agg_method != "Count":
-                        table[ylabel] = table[ylabel].map(lambda x: f"${x:,.2f}")
+                        table[ylabel] = table[ylabel].map(lambda x: f"{x:,.2f}")
                     st.dataframe(table, use_container_width=True, hide_index=True)
 
 st.markdown("---")
@@ -660,13 +704,14 @@ st.markdown("---")
 # ======================
 if view_mode in ["Expenses", "Both"]:
     st.subheader("📉 Expenses")
+
     if not filtered_expenses.empty:
         by_category = filtered_expenses.groupby("Category")["Amount"].sum().sort_values(ascending=False)
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("**Spending by Category**")
             st.dataframe(
-                by_category.reset_index().rename(columns={"Amount": "Total ($)"}).style.format({"Total ($)": "{:,.2f}"}),
+                by_category.reset_index().rename(columns={"Amount": "Total"}).style.format({"Total": "{:,.2f}"}),
                 use_container_width=True, hide_index=True,
             )
         with col2:
@@ -703,6 +748,7 @@ if view_mode in ["Expenses", "Both"]:
 
     st.markdown("---")
     st.subheader("All Expenses (Filtered)")
+
     display_df = filtered_expenses.copy().reset_index(drop=True)
     if "Date" in display_df.columns:
         display_df["Date"] = (
@@ -710,7 +756,7 @@ if view_mode in ["Expenses", "Both"]:
             .dt.strftime("%Y-%m-%d").fillna("")
         )
     display_df["Amount"] = clean_amount(display_df["Amount"])
-    for col in ["User", "Category", "Vendor", "Description", "Remark", "Source"]:
+    for col in ["User", "Category", "Currency", "Vendor", "Description", "Remark", "Source"]:
         if col in display_df.columns:
             display_df[col] = display_df[col].fillna("").astype(str)
 
@@ -729,7 +775,8 @@ if view_mode in ["Expenses", "Both"]:
             "Date": st.column_config.TextColumn("Date"),
             "User": st.column_config.TextColumn("User"),
             "Category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True),
-            "Amount": st.column_config.NumberColumn("Amount ($)", min_value=0.0, format="%,.2f", required=True),
+            "Amount": st.column_config.NumberColumn("Amount", min_value=0.0, format="%,.2f", required=True),
+            "Currency": st.column_config.SelectboxColumn("Currency", options=CURRENCIES, required=True),
             "Vendor": st.column_config.TextColumn("Vendor"),
             "Description": st.column_config.TextColumn("Description"),
             "Remark": st.column_config.TextColumn("Remark"),
@@ -743,6 +790,7 @@ if view_mode in ["Expenses", "Both"]:
             clean_df = edited_df.drop(columns=["Select", "No."], errors="ignore").copy()
             clean_df["Amount"] = clean_amount(clean_df["Amount"])
             clean_df["User"] = clean_df["User"].fillna(USER).astype(str)
+            clean_df["Currency"] = clean_df["Currency"].fillna("HKD").astype(str)
             clean_df["Vendor"] = clean_df["Vendor"].fillna("-").astype(str)
             clean_df["Description"] = clean_df["Description"].fillna("-").astype(str)
             clean_df["Remark"] = clean_df["Remark"].fillna("-").astype(str)
@@ -750,6 +798,7 @@ if view_mode in ["Expenses", "Both"]:
             clean_df["Category"] = clean_df["Category"].fillna("").astype(str)
             clean_df["Date"] = clean_df["Date"].fillna("").astype(str)
             clean_df = clean_df[(clean_df["Category"].str.strip() != "") & (clean_df["Amount"] > 0)]
+
             if selected_year == "All" and selected_month == "All":
                 st.session_state.expenses = clean_df[COLUMNS].reset_index(drop=True)
                 save_data()
@@ -804,13 +853,14 @@ if view_mode in ["Expenses", "Both"]:
 if view_mode in ["Income", "Both"]:
     st.markdown("---")
     st.subheader("📈 Income")
+
     if not filtered_income.empty:
         by_inc_cat = filtered_income.groupby("Category")["Amount"].sum().sort_values(ascending=False)
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("**Income by Category**")
             st.dataframe(
-                by_inc_cat.reset_index().rename(columns={"Amount": "Total ($)"}).style.format({"Total ($)": "{:,.2f}"}),
+                by_inc_cat.reset_index().rename(columns={"Amount": "Total"}).style.format({"Total": "{:,.2f}"}),
                 use_container_width=True, hide_index=True,
             )
         with col2:
@@ -847,6 +897,7 @@ if view_mode in ["Income", "Both"]:
 
     st.markdown("---")
     st.subheader("All Income (Filtered)")
+
     display_inc = filtered_income.copy().reset_index(drop=True)
     if "Date" in display_inc.columns:
         display_inc["Date"] = (
@@ -854,7 +905,7 @@ if view_mode in ["Income", "Both"]:
             .dt.strftime("%Y-%m-%d").fillna("")
         )
     display_inc["Amount"] = clean_amount(display_inc["Amount"])
-    for col in ["User", "Category", "Customer", "Description", "Remark", "Source"]:
+    for col in ["User", "Category", "Currency", "Customer", "Description", "Remark", "Source"]:
         if col in display_inc.columns:
             display_inc[col] = display_inc[col].fillna("").astype(str)
 
@@ -873,7 +924,8 @@ if view_mode in ["Income", "Both"]:
             "Date": st.column_config.TextColumn("Date"),
             "User": st.column_config.TextColumn("User"),
             "Category": st.column_config.SelectboxColumn("Category", options=INCOME_CATEGORIES, required=True),
-            "Amount": st.column_config.NumberColumn("Amount ($)", min_value=0.0, format="%,.2f", required=True),
+            "Amount": st.column_config.NumberColumn("Amount", min_value=0.0, format="%,.2f", required=True),
+            "Currency": st.column_config.SelectboxColumn("Currency", options=CURRENCIES, required=True),
             "Customer": st.column_config.TextColumn("Customer"),
             "Description": st.column_config.TextColumn("Description"),
             "Remark": st.column_config.TextColumn("Remark"),
@@ -887,6 +939,7 @@ if view_mode in ["Income", "Both"]:
             clean_inc = edited_inc.drop(columns=["Select", "No."], errors="ignore").copy()
             clean_inc["Amount"] = clean_amount(clean_inc["Amount"])
             clean_inc["User"] = clean_inc["User"].fillna(USER).astype(str)
+            clean_inc["Currency"] = clean_inc["Currency"].fillna("HKD").astype(str)
             clean_inc["Customer"] = clean_inc["Customer"].fillna("-").astype(str)
             clean_inc["Description"] = clean_inc["Description"].fillna("-").astype(str)
             clean_inc["Remark"] = clean_inc["Remark"].fillna("-").astype(str)
@@ -894,6 +947,7 @@ if view_mode in ["Income", "Both"]:
             clean_inc["Category"] = clean_inc["Category"].fillna("").astype(str)
             clean_inc["Date"] = clean_inc["Date"].fillna("").astype(str)
             clean_inc = clean_inc[(clean_inc["Category"].str.strip() != "") & (clean_inc["Amount"] > 0)]
+
             if selected_year == "All" and selected_month == "All":
                 st.session_state.income = clean_inc[INCOME_COLUMNS].reset_index(drop=True)
                 save_income()
