@@ -190,7 +190,7 @@ INCOME_COLUMNS = [
     "Customer", "Description", "Remark", "Source"
 ]
 
-CURRENCIES = ["HKD", "USD", "CNY", "EUR", "GBP", "JPY", "SGD", "Other"]
+CURRENCIES = ["HKD", "RMB", "JPY", "USD", "EUR"]
 
 # ---- Expenses ----
 if "expenses" not in st.session_state:
@@ -209,6 +209,8 @@ if "expenses" not in st.session_state:
 st.session_state.expenses["Amount"] = clean_amount(st.session_state.expenses["Amount"])
 if "Currency" in st.session_state.expenses.columns:
     st.session_state.expenses["Currency"] = st.session_state.expenses["Currency"].fillna("HKD").astype(str)
+else:
+    st.session_state.expenses["Currency"] = "HKD"
 
 def save_data():
     st.session_state.expenses.to_csv(USER_FILE, index=False, encoding="utf-8-sig")
@@ -230,6 +232,8 @@ if "income" not in st.session_state:
 st.session_state.income["Amount"] = clean_amount(st.session_state.income["Amount"])
 if "Currency" in st.session_state.income.columns:
     st.session_state.income["Currency"] = st.session_state.income["Currency"].fillna("HKD").astype(str)
+else:
+    st.session_state.income["Currency"] = "HKD"
 
 def save_income():
     st.session_state.income.to_csv(INCOME_FILE, index=False, encoding="utf-8-sig")
@@ -244,7 +248,7 @@ if (has_corrupted_chinese(st.session_state.expenses, ["Vendor", "Description", "
     )
 
 # ======================
-# Categories (UPDATED)
+# Categories
 # ======================
 CATEGORIES = [
     "Food & Dining", "Transportation", "Shopping", "Bills & Utilities",
@@ -605,10 +609,28 @@ with col_dl3:
             inc["Type"] = "Income"
             inc = inc.rename(columns={"Customer": "Party"})
             frames.append(inc)
+
         combined = pd.concat(frames, ignore_index=True)
-        combined = combined[
-            ["Date", "Type", "User", "Category", "Amount", "Currency", "Party", "Description", "Remark", "Source"]
+
+        # Ensure required columns exist (fix for old data)
+        if "Currency" not in combined.columns:
+            combined["Currency"] = "HKD"
+        if "Party" not in combined.columns:
+            combined["Party"] = "-"
+        if "Description" not in combined.columns:
+            combined["Description"] = "-"
+        if "Remark" not in combined.columns:
+            combined["Remark"] = "-"
+        if "Source" not in combined.columns:
+            combined["Source"] = "Manual"
+
+        desired_cols = [
+            "Date", "Type", "User", "Category", "Amount", "Currency",
+            "Party", "Description", "Remark", "Source"
         ]
+        existing_cols = [c for c in desired_cols if c in combined.columns]
+        combined = combined[existing_cols]
+
         csv_combined = combined.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
             label="📥 Download Combined CSV",
