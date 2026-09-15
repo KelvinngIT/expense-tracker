@@ -688,7 +688,11 @@ with st.expander("Create Custom Chart", expanded=False):
                 combined["Group"] = combined["Date"].dt.to_period("M").astype(str)
             elif group_by == "Source":
                 combined["Group"] = combined["Source"].astype(str)
-            else:
+            elif group_by == "Remark":
+                combined["Group"] = combined["Remark"].astype(str)
+            elif group_by == "Currency":
+                combined["Group"] = combined["Currency"].astype(str)
+            else:  # Vendor / Customer
                 combined["Group"] = combined["Party"].astype(str)
 
             if agg_method == "Sum":
