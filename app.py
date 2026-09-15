@@ -240,8 +240,8 @@ if (has_corrupted_chinese(st.session_state.expenses, ["Vendor", "Description", "
 CATEGORIES = [
     "Food & Dining", "Transportation", "Shopping", "Bills & Utilities",
     "Entertainment", "Health", "Education", "Travel",
-    "Type", "Family Support", "Assets", "Other",
-    "Health care", "Property", "Red pocket", "Transfer"
+    "Type", "Family Support", "Health care", "Red pocket","Assets", "Finance",
+    "Property", "Transfer","Other",
 ]
 
 INCOME_CATEGORIES = [
