@@ -24,6 +24,16 @@ def clean_amount(series):
     s = s.str.replace(r"[^0-9.\-]", "", regex=True)
     return pd.to_numeric(s, errors="coerce").fillna(0.0)
 
+def normalize_date_column(series):
+    """Convert any date format to clean YYYY-MM-DD string."""
+    if series is None or len(series) == 0:
+        return series
+    dt = pd.to_datetime(series, errors="coerce", dayfirst=False)
+    # Fallback if many dates failed
+    if dt.isna().mean() > 0.3:
+        dt = pd.to_datetime(series, errors="coerce", dayfirst=True)
+    return dt.dt.strftime("%Y-%m-%d").fillna("")
+
 def is_valid_email(email: str) -> bool:
     pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     return bool(re.match(pattern, email.strip()))
@@ -72,6 +82,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         "amount": "Amount", "value": "Amount", "price": "Amount",
         "cost": "Amount", "total": "Amount", "debit": "Amount",
         "currency": "Currency", "curr": "Currency", "ccy": "Currency",
+        "currecny": "Currency",          # handle common typo
         "vendor": "Vendor", "vendor_name": "Vendor", "payee": "Vendor",
         "merchant": "Vendor", "supplier": "Vendor", "store": "Vendor",
         "company": "Vendor", "business": "Vendor", "name": "Vendor", "party": "Vendor",
@@ -207,6 +218,7 @@ if "expenses" not in st.session_state:
         st.session_state.expenses = pd.DataFrame(columns=COLUMNS)
 
 st.session_state.expenses["Amount"] = clean_amount(st.session_state.expenses["Amount"])
+st.session_state.expenses["Date"] = normalize_date_column(st.session_state.expenses["Date"])
 if "Currency" in st.session_state.expenses.columns:
     st.session_state.expenses["Currency"] = st.session_state.expenses["Currency"].fillna("HKD").astype(str)
 else:
@@ -230,6 +242,7 @@ if "income" not in st.session_state:
         st.session_state.income = pd.DataFrame(columns=INCOME_COLUMNS)
 
 st.session_state.income["Amount"] = clean_amount(st.session_state.income["Amount"])
+st.session_state.income["Date"] = normalize_date_column(st.session_state.income["Date"])
 if "Currency" in st.session_state.income.columns:
     st.session_state.income["Currency"] = st.session_state.income["Currency"].fillna("HKD").astype(str)
 else:
@@ -362,11 +375,9 @@ if uploaded_file is not None:
         original_cols = list(import_df.columns)
         import_df = normalize_columns(import_df)
 
-        # Extra mapping for the common typo "Currecny"
+        # Extra safety for the typo "Currecny"
         if "Currecny" in import_df.columns and "Currency" not in import_df.columns:
             import_df = import_df.rename(columns={"Currecny": "Currency"})
-        if "currecny" in import_df.columns and "Currency" not in import_df.columns:
-            import_df = import_df.rename(columns={"currecny": "Currency"})
 
         min_required = {"Date", "Category", "Amount"}
         if not min_required.issubset(set(import_df.columns)):
@@ -393,14 +404,8 @@ if uploaded_file is not None:
 
             import_df = import_df[COLUMNS].copy()
 
-            # ---------- Robust Date cleaning ----------
-            import_df["Date"] = pd.to_datetime(
-                import_df["Date"],
-                errors="coerce",
-                dayfirst=False          # because your file is M/D/YYYY
-            )
-            # Convert to clean string YYYY-MM-DD (empty if invalid)
-            import_df["Date"] = import_df["Date"].dt.strftime("%Y-%m-%d").fillna("")
+            # Robust date cleaning
+            import_df["Date"] = normalize_date_column(import_df["Date"])
 
             import_df["Amount"] = clean_amount(import_df["Amount"])
             import_df = import_df[import_df["Amount"] > 0].copy()
@@ -423,6 +428,7 @@ if uploaded_file is not None:
                     [st.session_state.expenses, import_df], ignore_index=True
                 )
                 st.session_state.expenses["Amount"] = clean_amount(st.session_state.expenses["Amount"])
+                st.session_state.expenses["Date"] = normalize_date_column(st.session_state.expenses["Date"])
                 save_data()
                 st.sidebar.success(f"✅ Imported {len(st.session_state.expenses) - before} expenses!")
                 st.rerun()
@@ -472,6 +478,10 @@ if uploaded_income is not None:
                     import_inc[col] = defaults.get(col, "-")
 
             import_inc = import_inc[INCOME_COLUMNS].copy()
+
+            # Robust date cleaning
+            import_inc["Date"] = normalize_date_column(import_inc["Date"])
+
             import_inc["Amount"] = clean_amount(import_inc["Amount"])
             import_inc = import_inc[import_inc["Amount"] > 0].copy()
 
@@ -480,7 +490,7 @@ if uploaded_income is not None:
                 import_inc.loc[import_inc[col] == "", col] = defaults.get(col, "-")
 
             st.sidebar.dataframe(
-                import_inc[["Date", "Category", "Amount", "Currency", "Customer"]].head(3),
+                import_inc[["Date", "Category", "Amount", "Currency", "Customer"]].head(5),
                 use_container_width=True, hide_index=True
             )
 
@@ -490,6 +500,7 @@ if uploaded_income is not None:
                     [st.session_state.income, import_inc], ignore_index=True
                 )
                 st.session_state.income["Amount"] = clean_amount(st.session_state.income["Amount"])
+                st.session_state.income["Date"] = normalize_date_column(st.session_state.income["Date"])
                 save_income()
                 st.sidebar.success(f"Successfully imported {len(st.session_state.income) - before} income records!")
                 st.rerun()
@@ -628,17 +639,16 @@ with col_dl3:
 
         combined = pd.concat(frames, ignore_index=True)
 
-        # Ensure required columns exist (fix for old data)
-        if "Currency" not in combined.columns:
-            combined["Currency"] = "HKD"
-        if "Party" not in combined.columns:
-            combined["Party"] = "-"
-        if "Description" not in combined.columns:
-            combined["Description"] = "-"
-        if "Remark" not in combined.columns:
-            combined["Remark"] = "-"
-        if "Source" not in combined.columns:
-            combined["Source"] = "Manual"
+        # Ensure required columns exist
+        for col, default in {
+            "Currency": "HKD",
+            "Party": "-",
+            "Description": "-",
+            "Remark": "-",
+            "Source": "Manual"
+        }.items():
+            if col not in combined.columns:
+                combined[col] = default
 
         desired_cols = [
             "Date", "Type", "User", "Category", "Amount", "Currency",
@@ -673,7 +683,11 @@ with st.expander("Create Custom Chart", expanded=False):
     with c2:
         chart_type = st.selectbox("Chart Type", options=["Bar", "Line", "Area"], key="custom_type")
     with c3:
-        group_by = st.selectbox("Group By", options=["Category", "Month", "Source", "Vendor / Customer","Currency","Remark"], key="custom_group")
+        group_by = st.selectbox(
+            "Group By",
+            options=["Category", "Month", "Source", "Vendor / Customer", "Remark"],
+            key="custom_group"
+        )
     with c4:
         agg_method = st.selectbox("Aggregation", options=["Sum", "Count", "Average"], key="custom_agg")
 
@@ -706,8 +720,6 @@ with st.expander("Create Custom Chart", expanded=False):
                 combined["Group"] = combined["Source"].astype(str)
             elif group_by == "Remark":
                 combined["Group"] = combined["Remark"].astype(str)
-            elif group_by == "Currency":
-                combined["Group"] = combined["Currency"].astype(str)
             else:  # Vendor / Customer
                 combined["Group"] = combined["Party"].astype(str)
 
@@ -793,10 +805,7 @@ if view_mode in ["Expenses", "Both"]:
 
     display_df = filtered_expenses.copy().reset_index(drop=True)
     if "Date" in display_df.columns:
-        display_df["Date"] = (
-            pd.to_datetime(display_df["Date"], errors="coerce")
-            .dt.strftime("%Y-%m-%d").fillna("")
-        )
+        display_df["Date"] = normalize_date_column(display_df["Date"])
     display_df["Amount"] = clean_amount(display_df["Amount"])
     for col in ["User", "Category", "Currency", "Vendor", "Description", "Remark", "Source"]:
         if col in display_df.columns:
@@ -831,6 +840,7 @@ if view_mode in ["Expenses", "Both"]:
         if st.button("💾 Save Changes / Add Rows", type="primary", use_container_width=True, key="save_exp"):
             clean_df = edited_df.drop(columns=["Select", "No."], errors="ignore").copy()
             clean_df["Amount"] = clean_amount(clean_df["Amount"])
+            clean_df["Date"] = normalize_date_column(clean_df["Date"])
             clean_df["User"] = clean_df["User"].fillna(USER).astype(str)
             clean_df["Currency"] = clean_df["Currency"].fillna("HKD").astype(str)
             clean_df["Vendor"] = clean_df["Vendor"].fillna("-").astype(str)
@@ -838,7 +848,6 @@ if view_mode in ["Expenses", "Both"]:
             clean_df["Remark"] = clean_df["Remark"].fillna("-").astype(str)
             clean_df["Source"] = clean_df["Source"].fillna("Manual").astype(str)
             clean_df["Category"] = clean_df["Category"].fillna("").astype(str)
-            clean_df["Date"] = clean_df["Date"].fillna("").astype(str)
             clean_df = clean_df[(clean_df["Category"].str.strip() != "") & (clean_df["Amount"] > 0)]
 
             if selected_year == "All" and selected_month == "All":
@@ -942,10 +951,7 @@ if view_mode in ["Income", "Both"]:
 
     display_inc = filtered_income.copy().reset_index(drop=True)
     if "Date" in display_inc.columns:
-        display_inc["Date"] = (
-            pd.to_datetime(display_inc["Date"], errors="coerce")
-            .dt.strftime("%Y-%m-%d").fillna("")
-        )
+        display_inc["Date"] = normalize_date_column(display_inc["Date"])
     display_inc["Amount"] = clean_amount(display_inc["Amount"])
     for col in ["User", "Category", "Currency", "Customer", "Description", "Remark", "Source"]:
         if col in display_inc.columns:
@@ -980,6 +986,7 @@ if view_mode in ["Income", "Both"]:
         if st.button("💾 Save Income Changes", type="primary", use_container_width=True, key="save_inc"):
             clean_inc = edited_inc.drop(columns=["Select", "No."], errors="ignore").copy()
             clean_inc["Amount"] = clean_amount(clean_inc["Amount"])
+            clean_inc["Date"] = normalize_date_column(clean_inc["Date"])
             clean_inc["User"] = clean_inc["User"].fillna(USER).astype(str)
             clean_inc["Currency"] = clean_inc["Currency"].fillna("HKD").astype(str)
             clean_inc["Customer"] = clean_inc["Customer"].fillna("-").astype(str)
@@ -987,7 +994,6 @@ if view_mode in ["Income", "Both"]:
             clean_inc["Remark"] = clean_inc["Remark"].fillna("-").astype(str)
             clean_inc["Source"] = clean_inc["Source"].fillna("Manual").astype(str)
             clean_inc["Category"] = clean_inc["Category"].fillna("").astype(str)
-            clean_inc["Date"] = clean_inc["Date"].fillna("").astype(str)
             clean_inc = clean_inc[(clean_inc["Category"].str.strip() != "") & (clean_inc["Amount"] > 0)]
 
             if selected_year == "All" and selected_month == "All":
