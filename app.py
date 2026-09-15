@@ -362,6 +362,12 @@ if uploaded_file is not None:
         original_cols = list(import_df.columns)
         import_df = normalize_columns(import_df)
 
+        # Extra mapping for the common typo "Currecny"
+        if "Currecny" in import_df.columns and "Currency" not in import_df.columns:
+            import_df = import_df.rename(columns={"Currecny": "Currency"})
+        if "currecny" in import_df.columns and "Currency" not in import_df.columns:
+            import_df = import_df.rename(columns={"currecny": "Currency"})
+
         min_required = {"Date", "Category", "Amount"}
         if not min_required.issubset(set(import_df.columns)):
             st.sidebar.error(
@@ -386,6 +392,16 @@ if uploaded_file is not None:
                     import_df[col] = defaults.get(col, "-")
 
             import_df = import_df[COLUMNS].copy()
+
+            # ---------- Robust Date cleaning ----------
+            import_df["Date"] = pd.to_datetime(
+                import_df["Date"],
+                errors="coerce",
+                dayfirst=False          # because your file is M/D/YYYY
+            )
+            # Convert to clean string YYYY-MM-DD (empty if invalid)
+            import_df["Date"] = import_df["Date"].dt.strftime("%Y-%m-%d").fillna("")
+
             import_df["Amount"] = clean_amount(import_df["Amount"])
             import_df = import_df[import_df["Amount"] > 0].copy()
 
@@ -397,7 +413,7 @@ if uploaded_file is not None:
 
             st.sidebar.markdown(f"**Preview** ({len(import_df)} rows)")
             st.sidebar.dataframe(
-                import_df[["Date", "Category", "Amount", "Currency", "Vendor"]].head(5),
+                import_df[["Date", "Category", "Amount", "Currency", "Vendor"]].head(8),
                 use_container_width=True, hide_index=True
             )
 
