@@ -657,7 +657,7 @@ with st.expander("Create Custom Chart", expanded=False):
     with c2:
         chart_type = st.selectbox("Chart Type", options=["Bar", "Line", "Area"], key="custom_type")
     with c3:
-        group_by = st.selectbox("Group By", options=["Category", "Month", "Source", "Vendor / Customer","Currency","remark"], key="custom_group")
+        group_by = st.selectbox("Group By", options=["Category", "Month", "Source", "Vendor / Customer","Currency","Remark"], key="custom_group")
     with c4:
         agg_method = st.selectbox("Aggregation", options=["Sum", "Count", "Average"], key="custom_agg")
 
