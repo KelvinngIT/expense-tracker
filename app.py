@@ -800,6 +800,71 @@ if view_mode in ["Expenses", "Both"]:
     else:
         st.info("Add some expenses to see monthly charts.")
 
+# ======================
+# Monthly Total by Vendor
+# ======================
+st.markdown("### 🏪 Monthly Expense Charts (by Vendor)")
+if not st.session_state.expenses.empty:
+    vendor_chart = st.session_state.expenses.copy()
+    vendor_chart["Amount"] = clean_amount(vendor_chart["Amount"])
+    vendor_chart["Date"] = pd.to_datetime(vendor_chart["Date"], errors="coerce")
+    vendor_chart = vendor_chart.dropna(subset=["Date"])
+
+    if selected_year != "All":
+        vendor_chart = vendor_chart[vendor_chart["Date"].dt.year == int(selected_year)]
+
+    if not vendor_chart.empty:
+        vendor_chart["YearMonth"] = vendor_chart["Date"].dt.to_period("M").astype(str)
+
+        # Keep only top vendors to avoid overcrowded charts
+        top_vendors = (
+            vendor_chart.groupby("Vendor")["Amount"]
+            .sum()
+            .sort_values(ascending=False)
+            .head(12)
+            .index
+        )
+        vendor_chart = vendor_chart[vendor_chart["Vendor"].isin(top_vendors)]
+
+        monthly_by_vendor = (
+            vendor_chart.groupby(["YearMonth", "Vendor"])["Amount"]
+            .sum()
+            .unstack(fill_value=0)
+            .sort_index()
+        )
+        monthly_by_vendor = monthly_by_vendor.loc[:, (monthly_by_vendor != 0).any(axis=0)]
+
+        st.caption("Showing top 12 vendors by total spending • Each color = one vendor")
+        st.bar_chart(monthly_by_vendor, use_container_width=True)
+
+        with st.expander("📋 View monthly totals by vendor"):
+            display_vendor = monthly_by_vendor.copy()
+            display_vendor["Total"] = display_vendor.sum(axis=1)
+            st.dataframe(
+                display_vendor.style.format("{:,.2f}"),
+                use_container_width=True
+            )
+
+        # Quick summary table (filtered period)
+        st.markdown("#### 📌 Vendor Summary (Current Filter)")
+        by_vendor = (
+            filtered_expenses.groupby("Vendor")["Amount"]
+            .sum()
+            .sort_values(ascending=False)
+            .reset_index()
+            .rename(columns={"Amount": "Total"})
+        )
+        by_vendor["% of Total"] = (by_vendor["Total"] / by_vendor["Total"].sum() * 100).round(1)
+        st.dataframe(
+            by_vendor.style.format({"Total": "{:,.2f}", "% of Total": "{:.1f}%"}),
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info("No expense data for vendor charts.")
+else:
+    st.info("Add some expenses to see vendor charts.")
+    
     st.markdown("---")
     st.subheader("All Expenses (Filtered)")
 
