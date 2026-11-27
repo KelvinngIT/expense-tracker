@@ -106,71 +106,34 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user_email" not in st.session_state:
     st.session_state.user_email = None
-if "verification_code" not in st.session_state:
-    st.session_state.verification_code = None
-if "pending_email" not in st.session_state:
-    st.session_state.pending_email = None
-if "code_sent" not in st.session_state:
-    st.session_state.code_sent = False
 
 # ======================
-# Login + Verification UI
+# Login UI (Simple)
 # ======================
-st.sidebar.header("🔐 Login with Email")
+st.sidebar.header("🔐 Login")
 
 if not st.session_state.logged_in:
-    if not st.session_state.code_sent:
-        with st.sidebar.form("email_form"):
-            email = st.text_input("Email address", placeholder="you@example.com")
-            send_btn = st.form_submit_button(
-                "Send Verification Code", use_container_width=True, type="primary"
-            )
-            if send_btn:
-                email = email.strip().lower()
-                if not email:
-                    st.error("Please enter your email.")
-                elif not is_valid_email(email):
-                    st.error("Please enter a valid email address.")
-                else:
-                    code = generate_verification_code()
-                    st.session_state.verification_code = code
-                    st.session_state.pending_email = email
-                    st.session_state.code_sent = True
-                    st.rerun()
-    else:
-        st.sidebar.info(f"Code sent to:\n**{st.session_state.pending_email}**")
-        st.sidebar.warning(f"🧪 Demo Code: **{st.session_state.verification_code}**")
-        st.sidebar.caption("In a real app this code would be sent by email.")
-        with st.sidebar.form("verify_form"):
-            user_code = st.text_input("Enter 6-digit verification code", max_chars=6)
-            col1, col2 = st.columns(2)
-            with col1:
-                verify_btn = st.form_submit_button(
-                    "Verify & Login", use_container_width=True, type="primary"
-                )
-            with col2:
-                back_btn = st.form_submit_button("← Back", use_container_width=True)
-            if back_btn:
-                st.session_state.code_sent = False
-                st.session_state.verification_code = None
-                st.session_state.pending_email = None
+    with st.sidebar.form("login_form"):
+        email = st.text_input("Email address", placeholder="you@example.com")
+        login_btn = st.form_submit_button("Login", use_container_width=True, type="primary")
+
+        if login_btn:
+            email = email.strip().lower()
+            if not email:
+                st.error("Please enter your email.")
+            elif not is_valid_email(email):
+                st.error("Please enter a valid email address.")
+            else:
+                st.session_state.logged_in = True
+                st.session_state.user_email = email
+                st.success("Login successful!")
                 st.rerun()
-            if verify_btn:
-                if user_code.strip() == st.session_state.verification_code:
-                    st.session_state.logged_in = True
-                    st.session_state.user_email = st.session_state.pending_email
-                    st.session_state.code_sent = False
-                    st.session_state.verification_code = None
-                    st.session_state.pending_email = None
-                    st.success("Login successful!")
-                    st.rerun()
-                else:
-                    st.error("Incorrect verification code. Please try again.")
 else:
     st.sidebar.success(f"Logged in as:\n**{st.session_state.user_email}**")
     if st.sidebar.button("Logout", use_container_width=True):
         st.session_state.logged_in = False
         st.session_state.user_email = None
+        # Clear data when logout (optional)
         st.session_state.pop("expenses", None)
         st.session_state.pop("income", None)
         st.rerun()
